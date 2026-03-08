@@ -2,7 +2,7 @@
   <img src="shellm-logo.svg" alt="SheLLM" width="360">
 </p>
 
-A lightweight [OpenClaw](https://github.com/openclaw) alternative. One base class, 20 built-in tools + MCP extensibility, extend in 15 lines.
+A lightweight [OpenClaw](https://github.com/openclaw) alternative. One base class, 21 built-in tools + MCP extensibility, extend in 15 lines.
 
 **SheLLM** (pronounced *shell-el-em*) is a minimal CLI chat framework for tool-using LLMs. It gives any OpenAI-compatible model web search, shell access, cron scheduling, persistent memory, file editing, RAG document search, chat logging, and MCP server integration -- out of the box, with zero config.
 
@@ -84,7 +84,7 @@ if __name__ == "__main__":
 
 Override `build_params()` for custom behavior (see `deepseek_chat.py` and `kimi_chat.py` for examples).
 
-## Built-in Tools (20)
+## Built-in Tools (21)
 
 Every engine gets all of these automatically:
 
@@ -108,6 +108,7 @@ Every engine gets all of these automatically:
 | `memory_search` | Search memories by keyword (FTS5 full-text search) |
 | `memory_delete` | Delete a memory entry |
 | `chat_log_read` | Query past conversations across all engines |
+| `claude_code` | Delegate complex coding tasks to Claude Code (AI coding agent) |
 | `mcp_list_servers` | List configured MCP servers and connection status |
 | `mcp_list_tools` | List tools available from MCP servers |
 
@@ -191,7 +192,7 @@ The LLM can read its own past logs via the `chat_log_read` tool.
 
 ```
 BaseChatClient (base_chat.py, ~700 loc)
-  |-- 20 built-in tools + MCP dynamic tools
+  |-- 21 built-in tools + MCP dynamic tools
   |-- Streaming + batch response handling
   |-- Optional reasoning/thinking display
   |-- Self-aware system prompt (knows its own codebase)

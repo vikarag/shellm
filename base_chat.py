@@ -278,6 +278,21 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "claude_code",
+            "description": "Delegate a task to Claude Code (Anthropic's AI coding agent). Use for complex coding tasks: writing code, debugging, refactoring, multi-file edits, running tests, git operations, and project scaffolding. Claude Code has full filesystem and shell access in the working directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "The task or instruction for Claude Code"},
+                    "working_directory": {"type": "string", "description": "Directory to run in (default: ~/llm-api-vault)"},
+                },
+                "required": ["prompt"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "mcp_list_servers",
             "description": "List all configured MCP servers and their connection status.",
             "parameters": {"type": "object", "properties": {}},
@@ -490,6 +505,8 @@ class BaseChatClient:
                 keyword=args.get("keyword"),
                 model_filter=args.get("model_filter"),
             )
+        elif name == "claude_code":
+            return self._run_claude_code(args.get("prompt", ""), args.get("working_directory"))
         elif name == "mcp_list_servers":
             return MCPManager.get_instance().list_servers()
         elif name == "mcp_list_tools":
@@ -500,6 +517,40 @@ class BaseChatClient:
             except Exception as e:
                 return f"MCP tool error ({name}): {e}"
         return f"Unknown tool: {name}"
+
+    def _run_claude_code(self, prompt, working_directory=None):
+        """Run Claude Code CLI with the given prompt and return its output."""
+        import subprocess as _sp
+
+        cwd = working_directory or os.path.dirname(os.path.abspath(__file__))
+        if not os.path.isdir(cwd):
+            return f"Directory not found: {cwd}"
+
+        # Build env without CLAUDECODE to avoid nested-session block
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+
+        cmd = ["claude", "-p", prompt, "--output-format", "text"]
+        self._print(f"[Claude Code] Running in {cwd}...")
+
+        try:
+            result = _sp.run(
+                cmd, capture_output=True, text=True,
+                timeout=300, cwd=cwd, env=env,
+            )
+            output = result.stdout
+            if result.stderr:
+                output += ("\n" if output else "") + result.stderr
+            if not output:
+                output = f"(no output, exit code: {result.returncode})"
+            elif result.returncode != 0:
+                output += f"\n(exit code: {result.returncode})"
+            return output
+        except _sp.TimeoutExpired:
+            return "Claude Code timed out after 5 minutes."
+        except FileNotFoundError:
+            return "Claude Code CLI not found. Install with: npm install -g @anthropic-ai/claude-code"
+        except Exception as e:
+            return f"Claude Code error: {e}"
 
     def handle_tool_calls(self, response_message, messages):
         messages.append(response_message)
@@ -599,7 +650,9 @@ class BaseChatClient:
             "You also have a RAG system — use rag_index to store documents for semantic search, "
             "and rag_search to retrieve relevant chunks later. Suggest indexing when the user sends documents. "
             "You also have MCP (Model Context Protocol) support — external servers can provide "
-            "additional tools. Use mcp_list_servers to see connected servers.\n\n"
+            "additional tools. Use mcp_list_servers to see connected servers. "
+            "You can delegate complex coding tasks to Claude Code (Anthropic's AI coding agent) "
+            "via the claude_code tool — it has full filesystem, shell, and git access.\n\n"
             "Proactively save useful information about the user to memory for future sessions.\n\n"
             "SELF-AWARENESS: Your own source code lives at ~/llm-api-vault/. You ARE SheLLM — "
             "when the user mentions 'your backend', 'your code', or 'your system', they mean YOUR files. "
