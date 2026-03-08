@@ -29,7 +29,8 @@ class DeepSeekChat(BaseChatClient):
             params["temperature"] = self.TEMPERATURE
         if self.SUPPORTS_TOOLS:
             from base_chat import TOOLS
-            params["tools"] = TOOLS
+            from mcp_manager import MCPManager
+            params["tools"] = TOOLS + MCPManager.get_instance().get_tools()
         return params
 
     def build_no_tool_params(self, messages):

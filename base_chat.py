@@ -17,6 +17,7 @@ from command_runner import run_command
 from memory_manager import memory_read, memory_write, memory_search, memory_delete
 from file_tools import read_file, write_file, list_directory, search_files
 from rag_engine import rag_index, rag_search, rag_list, rag_delete
+from mcp_manager import MCPManager
 
 CHAT_LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chat_logs.json")
 KST = timezone(timedelta(hours=9))
@@ -274,6 +275,27 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "mcp_list_servers",
+            "description": "List all configured MCP servers and their connection status.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mcp_list_tools",
+            "description": "List tools available from MCP servers.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "server": {"type": "string", "description": "Server name to filter (optional)"},
+                },
+            },
+        },
+    },
 ]
 
 
@@ -381,7 +403,7 @@ class BaseChatClient:
         if self.TEMPERATURE is not None:
             params["temperature"] = self.TEMPERATURE
         if self.SUPPORTS_TOOLS:
-            params["tools"] = TOOLS
+            params["tools"] = TOOLS + MCPManager.get_instance().get_tools()
         return params
 
     def build_no_tool_params(self, messages):
@@ -468,6 +490,15 @@ class BaseChatClient:
                 keyword=args.get("keyword"),
                 model_filter=args.get("model_filter"),
             )
+        elif name == "mcp_list_servers":
+            return MCPManager.get_instance().list_servers()
+        elif name == "mcp_list_tools":
+            return MCPManager.get_instance().list_server_tools(args.get("server"))
+        elif "__" in name:
+            try:
+                return MCPManager.get_instance().call_tool(name, args)
+            except Exception as e:
+                return f"MCP tool error ({name}): {e}"
         return f"Unknown tool: {name}"
 
     def handle_tool_calls(self, response_message, messages):
@@ -567,6 +598,8 @@ class BaseChatClient:
             "in workspace/, and review past chat logs with chat_log_read. "
             "You also have a RAG system — use rag_index to store documents for semantic search, "
             "and rag_search to retrieve relevant chunks later. Suggest indexing when the user sends documents. "
+            "You also have MCP (Model Context Protocol) support — external servers can provide "
+            "additional tools. Use mcp_list_servers to see connected servers.\n\n"
             "Proactively save useful information about the user to memory for future sessions.\n\n"
             "SELF-AWARENESS: Your own source code lives at ~/llm-api-vault/. You ARE shellm — "
             "when the user mentions 'your backend', 'your code', or 'your system', they mean YOUR files. "

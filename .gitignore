@@ -28,6 +28,9 @@ shellm.db-shm
 # Workspace (shellm project files)
 workspace/
 
+# MCP server config (may contain local paths)
+mcp_servers.json
+
 # Environment variables
 .env
 .env.*

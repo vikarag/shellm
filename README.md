@@ -1,8 +1,8 @@
 # shellm
 
-A lightweight [OpenClaw](https://github.com/openclaw) alternative. One base class, 18 built-in tools, extend in 15 lines.
+A lightweight [OpenClaw](https://github.com/openclaw) alternative. One base class, 20 built-in tools + MCP extensibility, extend in 15 lines.
 
-**shellm** is a minimal CLI chat framework for tool-using LLMs. It gives any OpenAI-compatible model web search, shell access, cron scheduling, persistent memory, file editing, RAG document search, and chat logging -- out of the box, with zero config.
+**shellm** is a minimal CLI chat framework for tool-using LLMs. It gives any OpenAI-compatible model web search, shell access, cron scheduling, persistent memory, file editing, RAG document search, chat logging, and MCP server integration -- out of the box, with zero config.
 
 ```bash
 echo "Summarize today's news" | ./gpt5mini_chat.py --daemon stdin
@@ -14,7 +14,7 @@ echo "Summarize today's news" | ./gpt5mini_chat.py --daemon stdin
 |---|---------|--------|
 | Setup | Config files, plugin system, dependencies | One Python class. `pip install openai numpy` |
 | Add a model | Write adapter, register, configure | 15 lines: subclass, set 3 attributes, done |
-| Tool system | Plugin architecture | Built-in: search, shell, cron, memory, chat logs |
+| Tool system | Plugin architecture | Built-in: search, shell, cron, memory, chat logs, MCP |
 | Modes | Interactive | Interactive, daemon (stdin/file/socket), Telegram |
 | Footprint | Heavy | ~500 lines of core code |
 | **API cost** | Depends on model choice | **< $1/month** typical usage (see below) |
@@ -82,7 +82,7 @@ if __name__ == "__main__":
 
 Override `build_params()` for custom behavior (see `deepseek_chat.py` and `kimi_chat.py` for examples).
 
-## Built-in Tools (18)
+## Built-in Tools (20)
 
 Every engine gets all of these automatically:
 
@@ -106,8 +106,31 @@ Every engine gets all of these automatically:
 | `memory_search` | Search memories by keyword (FTS5 full-text search) |
 | `memory_delete` | Delete a memory entry |
 | `chat_log_read` | Query past conversations across all engines |
+| `mcp_list_servers` | List configured MCP servers and connection status |
+| `mcp_list_tools` | List tools available from MCP servers |
 
 The model decides when to use them. Up to 10 tool-call rounds per turn.
+
+## MCP Server Support
+
+shellm supports [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) — connect external tool servers without changing code. Any MCP server (filesystem, databases, APIs, etc.) can extend shellm's capabilities dynamically.
+
+```bash
+# Create mcp_servers.json (Claude Desktop format):
+cat > mcp_servers.json << 'EOF'
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/workspace"],
+      "env": {}
+    }
+  }
+}
+EOF
+```
+
+MCP tools are namespaced as `{server}__{tool}` (e.g., `filesystem__read_file`) to avoid collisions with built-in tools. Servers connect lazily on first use. Missing config, failed servers, or missing SDK = no crash, just no MCP tools.
 
 ## Telegram Bot
 
@@ -165,8 +188,8 @@ The LLM can read its own past logs via the `chat_log_read` tool.
 ## Architecture
 
 ```
-BaseChatClient (base_chat.py, ~600 loc)
-  |-- 18 built-in tools
+BaseChatClient (base_chat.py, ~700 loc)
+  |-- 20 built-in tools + MCP dynamic tools
   |-- Streaming + batch response handling
   |-- Optional reasoning/thinking display
   |-- Self-aware system prompt (knows its own codebase)
@@ -182,7 +205,8 @@ Modules:
   |-- rag_engine.py      Document indexing + hybrid search (cosine + BM25)
   |-- command_runner.py   Shell command execution
   |-- cron_manager.py     Cron job management
-  +-- memory_manager.py   Persistent shared memory (SQLite + FTS5 + auto-archival)
+  |-- memory_manager.py   Persistent shared memory (SQLite + FTS5 + auto-archival)
+  +-- mcp_manager.py      MCP server connections + tool routing (async bridge)
 
 Engines: 15-50 lines each
   |-- deepseek_chat.py   Chat    (DeepSeek, +reasoner conditional logic)
