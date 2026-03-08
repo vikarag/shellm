@@ -1,4 +1,6 @@
-# SheLLM
+<p align="center">
+  <img src="shellm-logo.svg" alt="SheLLM" width="360">
+</p>
 
 A lightweight [OpenClaw](https://github.com/openclaw) alternative. One base class, 20 built-in tools + MCP extensibility, extend in 15 lines.
 
