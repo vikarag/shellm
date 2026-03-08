@@ -17,7 +17,7 @@ echo "Summarize today's news" | ./gpt5mini_chat.py --daemon stdin
 | Tool system | Plugin architecture | Built-in: search, shell, cron, memory, chat logs, MCP |
 | Modes | Interactive | Interactive, daemon (stdin/file/socket), Telegram |
 | Footprint | Heavy | ~500 lines of core code |
-| **API cost** | Depends on model choice | **< $1/month** typical usage (see below) |
+| **API cost** | Depends on model choice | **~$2-3/month** typical usage (see below) |
 
 ## Cost-Effective by Design
 
