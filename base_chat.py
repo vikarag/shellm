@@ -279,7 +279,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "claude_code",
-            "description": "Delegate a task to Claude Code (Anthropic's AI coding agent). Use for complex coding tasks: writing code, debugging, refactoring, multi-file edits, running tests, git operations, and project scaffolding. Claude Code has full filesystem and shell access in the working directory.",
+            "description": "Delegate a task to Claude Code (Anthropic's AI coding agent). ONLY use when the user explicitly requests Claude Code. Claude Code has full filesystem, shell, and git access in the working directory.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -651,8 +651,9 @@ class BaseChatClient:
             "and rag_search to retrieve relevant chunks later. Suggest indexing when the user sends documents. "
             "You also have MCP (Model Context Protocol) support — external servers can provide "
             "additional tools. Use mcp_list_servers to see connected servers. "
-            "You can delegate complex coding tasks to Claude Code (Anthropic's AI coding agent) "
-            "via the claude_code tool — it has full filesystem, shell, and git access.\n\n"
+            "You have a claude_code tool that delegates tasks to Claude Code (Anthropic's AI coding agent). "
+            "IMPORTANT: Only use claude_code when the user explicitly asks to use Claude Code or Claude. "
+            "For all other coding tasks, use run_command and file tools directly.\n\n"
             "Proactively save useful information about the user to memory for future sessions.\n\n"
             "SELF-AWARENESS: Your own source code lives at ~/llm-api-vault/. You ARE SheLLM — "
             "when the user mentions 'your backend', 'your code', or 'your system', they mean YOUR files. "
