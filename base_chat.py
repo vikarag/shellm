@@ -816,10 +816,11 @@ class BaseChatClient:
                     self._on_token("".join(answer_chunks))
 
         if tool_calls_data:
-            return None, tool_calls_data
+            reasoning = "".join(reasoning_chunks) if reasoning_chunks else None
+            return None, tool_calls_data, reasoning
 
         self._print("\n")
-        return "".join(answer_chunks), None
+        return "".join(answer_chunks), None, None
 
     def handle_batch(self, response):
         message = response.choices[0].message
@@ -944,7 +945,7 @@ class BaseChatClient:
 
             for _ in range(20):
                 if self.STREAM:
-                    answer, tool_data = self.handle_stream(response)
+                    answer, tool_data, reasoning = self.handle_stream(response)
                     if tool_data:
                         from openai.types.chat import ChatCompletionMessage
                         from openai.types.chat.chat_completion_message_tool_call import (
@@ -961,9 +962,12 @@ class BaseChatClient:
                                     arguments=tc["function"]["arguments"],
                                 ),
                             ))
-                        msg = ChatCompletionMessage(
+                        msg_kwargs = dict(
                             role="assistant", content=None, tool_calls=tc_list,
                         )
+                        if reasoning and self.HAS_REASONING:
+                            msg_kwargs["reasoning_content"] = reasoning
+                        msg = ChatCompletionMessage(**msg_kwargs)
                         response = self.handle_tool_calls(msg, messages)
                         continue
                 else:
@@ -978,7 +982,7 @@ class BaseChatClient:
                     **self.build_no_tool_params(messages)
                 )
                 if self.STREAM:
-                    answer, _ = self.handle_stream(response)
+                    answer, _, _ = self.handle_stream(response)
                 else:
                     answer, _ = self.handle_batch(response)
 
