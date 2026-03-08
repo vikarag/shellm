@@ -17,10 +17,25 @@ echo "Summarize today's news" | ./gpt5mini_chat.py --daemon stdin
 | Tool system | Plugin architecture | Built-in: search, shell, cron, memory, chat logs |
 | Modes | Interactive | Interactive, daemon (stdin/file/socket), Telegram |
 | Footprint | Heavy | ~500 lines of core code |
+| **API cost** | Depends on model choice | **< $1/month** typical usage (see below) |
+
+## Cost-Effective by Design
+
+shellm is built around the most cost-effective LLM APIs available today:
+
+| Engine | Model | Input | Output | Typical monthly cost |
+|--------|-------|-------|--------|---------------------|
+| **Chat** | DeepSeek V3 | $0.27/M tokens | $1.10/M tokens | ~$0.10 |
+| **Code** | Kimi K2.5 | $0.35/M tokens | $1.40/M tokens | ~$0.15 |
+| **Research** | GPT-5 Mini | $1.25/M tokens | $5.00/M tokens | ~$0.50 |
+
+**Total: under $1/month for typical personal use** (a few dozen queries per day).
+
+For comparison, Claude Pro or ChatGPT Plus subscriptions cost $20/month. shellm gives you three specialized engines with tool calling, web search, persistent memory, and Telegram access -- for a fraction of the cost, with no subscription lock-in. You pay only for what you use.
 
 ## Three Engines
 
-shellm ships with three purpose-built engines:
+shellm ships with three purpose-built engines, each chosen for its strength:
 
 | Engine | Script | Model | Role |
 |--------|--------|-------|------|
@@ -43,10 +58,9 @@ python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 python -m camoufox fetch
 
-# Set at least one API key
-export DEEPSEEK_API_KEY="your-key"     # Chat engine
-export MOONSHOT_API_KEY="your-key"     # Code engine
-export OPENAI_API_KEY="your-key"       # Research engine
+# Copy .env.example and fill in your keys
+cp .env.example .env
+# Edit .env with your API keys (at least one)
 
 ./deepseek_chat.py
 ```
@@ -89,6 +103,19 @@ Every engine gets all of these automatically:
 
 The model decides when to use them. Up to 10 tool-call rounds per turn.
 
+## Telegram Bot
+
+shellm runs natively as a Telegram bot with real-time streaming and HTML-formatted responses.
+
+```bash
+# Set your bot token in .env, then:
+./deepseek_chat.py --telegram
+```
+
+**Bot commands:** `/search`, `/memory`, `/remember`, `/recall`, `/logs`, `/model`, `/clear`, `/forget`, `/help`
+
+Responses are automatically converted from Markdown to Telegram HTML with proper code blocks, bold, italic, links, and blockquotes.
+
 ## Run Modes
 
 ```bash
@@ -108,7 +135,6 @@ echo "What is 2+2?" | ./deepseek_chat.py --daemon stdin --json
 ./deepseek_chat.py --daemon socket --socket-path /tmp/deepseek.sock
 
 # Telegram bot
-export TELEGRAM_BOT_TOKEN="your-token"
 ./deepseek_chat.py --telegram
 ```
 
@@ -134,18 +160,21 @@ The LLM can read its own past logs via the `chat_log_read` tool.
 
 ```
 BaseChatClient (base_chat.py, ~500 loc)
-  ├── 11 built-in tools
-  ├── Streaming + batch response handling
-  ├── Optional reasoning/thinking display
-  ├── Chat logging (chat_logs.json)
-  ├── System timezone awareness (KST)
-  ├── Daemon mode (daemon_mode.py)
-  └── Telegram adapter (telegram_adapter.py)
+  |-- 11 built-in tools
+  |-- Streaming + batch response handling
+  |-- Optional reasoning/thinking display
+  |-- Self-aware system prompt (knows its own codebase)
+  |-- Chat logging (chat_logs.json)
+  |-- System timezone awareness (KST)
+  |-- Daemon mode (daemon_mode.py)
+  +-- Telegram adapter (telegram_adapter.py + telegram_format.py)
 
 Engines: 15-50 lines each
-  ├── deepseek_chat.py   Chat    (DeepSeek, +reasoner conditional logic)
-  ├── kimi_chat.py       Code    (Kimi K2.5, +thinking mode toggle)
-  └── gpt5mini_chat.py   Research (GPT-5 Mini, config only)
+  |-- deepseek_chat.py   Chat    (DeepSeek, +reasoner conditional logic)
+  |-- kimi_chat.py       Code    (Kimi K2.5, +thinking mode toggle)
+  +-- gpt5mini_chat.py   Research (GPT-5 Mini, config only)
+
+workspace/  -- shellm's project directory for file output
 ```
 
 ## MCP Server

@@ -2,8 +2,11 @@
 """Telegram bot adapter for LLM chat clients with streaming via sendMessageDraft."""
 
 import asyncio
+import html as html_mod
 import os
 import time
+
+from telegram_format import md_to_tg_html, split_message
 
 
 class TelegramAdapter:
@@ -37,6 +40,16 @@ class TelegramAdapter:
         if chat_id not in self.sessions:
             self.sessions[chat_id] = []
         return self.sessions[chat_id]
+
+    async def _send_response(self, message, text):
+        """Send an LLM response with HTML formatting, falling back to plain text."""
+        try:
+            formatted = md_to_tg_html(text)
+            for chunk in split_message(formatted):
+                await message.reply_text(chunk, parse_mode="HTML")
+        except Exception:
+            for chunk in split_message(text):
+                await message.reply_text(chunk)
 
     def _process_streaming(self, text, messages, token_queue):
         """Run blocking process_prompt with a token callback that feeds an asyncio queue."""
@@ -120,34 +133,33 @@ class TelegramAdapter:
             await update.message.chat.send_action(ChatAction.TYPING)
             try:
                 response = await adapter.handle_message_streaming(chat_id, text, bot)
-                if len(response) > 4000:
-                    for i in range(0, len(response), 4000):
-                        await update.message.reply_text(response[i:i + 4000])
-                else:
-                    await update.message.reply_text(response)
+                await adapter._send_response(update.message, response)
             except Exception as e:
                 await update.message.reply_text(f"Error: {e}")
 
         async def _on_start(update: Update, context):
+            model = html_mod.escape(adapter.client.MODEL)
             await update.message.reply_text(
-                f"shellm ({adapter.client.MODEL})\n\n"
+                f"<b>shellm</b>  <code>{model}</code>\n\n"
                 "I'm an AI assistant with web search, shell access, "
                 "persistent memory, and more.\n\n"
-                "Just send a message to chat, or use /help for commands."
+                "Just send a message to chat, or use /help for commands.",
+                parse_mode="HTML",
             )
 
         async def _on_help(update: Update, context):
             await update.message.reply_text(
-                "Available commands:\n\n"
-                "/search <query> -- Research a topic with web search\n"
-                "/memory -- Read shared memory\n"
-                "/remember <text> -- Save something to memory\n"
-                "/recall <keyword> -- Search memory by keyword\n"
-                "/logs -- Show recent chat history\n"
-                "/model -- Show current engine info\n"
-                "/clear -- Reset conversation history\n"
-                "/forget -- Clear conversation + all memory\n"
-                "/help -- Show this message"
+                "<b>Available commands</b>\n\n"
+                "• /search <code>&lt;query&gt;</code> — Research with web search\n"
+                "• /memory — Read shared memory\n"
+                "• /remember <code>&lt;text&gt;</code> — Save to memory\n"
+                "• /recall <code>&lt;keyword&gt;</code> — Search memory\n"
+                "• /logs — Recent chat history\n"
+                "• /model — Current engine info\n"
+                "• /clear — Reset conversation\n"
+                "• /forget — Clear conversation history\n"
+                "• /help — Show this message",
+                parse_mode="HTML",
             )
 
         async def _on_clear(update: Update, context):
@@ -161,7 +173,7 @@ class TelegramAdapter:
         async def _on_search(update: Update, context):
             query = " ".join(context.args) if context.args else ""
             if not query:
-                await update.message.reply_text("Usage: /search <query>")
+                await update.message.reply_text("Usage: /search <code>&lt;query&gt;</code>", parse_mode="HTML")
                 return
             chat_id = update.effective_chat.id
             bot = context.bot
@@ -170,11 +182,7 @@ class TelegramAdapter:
                 response = await adapter.handle_message_streaming(
                     chat_id, f"/search {query}", bot
                 )
-                if len(response) > 4000:
-                    for i in range(0, len(response), 4000):
-                        await update.message.reply_text(response[i:i + 4000])
-                else:
-                    await update.message.reply_text(response)
+                await adapter._send_response(update.message, response)
             except Exception as e:
                 await update.message.reply_text(f"Error: {e}")
 
@@ -187,7 +195,7 @@ class TelegramAdapter:
         async def _on_remember(update: Update, context):
             text = " ".join(context.args) if context.args else ""
             if not text:
-                await update.message.reply_text("Usage: /remember <something to save>")
+                await update.message.reply_text("Usage: /remember <code>&lt;text&gt;</code>", parse_mode="HTML")
                 return
             chat_id = update.effective_chat.id
             bot = context.bot
@@ -197,7 +205,7 @@ class TelegramAdapter:
                 f"Save this to memory using memory_write: {text}",
                 bot,
             )
-            await update.message.reply_text(response)
+            await adapter._send_response(update.message, response)
 
         async def _on_recall(update: Update, context):
             keyword = " ".join(context.args) if context.args else ""
