@@ -1,4 +1,4 @@
-#!/home/gslee/llm-api-vault/venv/bin/python3
+#!/home/gslee/shellm/venv/bin/python3
 """SheLLM Chat Engine -- DeepSeek for general conversation and reasoning."""
 
 from base_chat import BaseChatClient

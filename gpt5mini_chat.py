@@ -1,4 +1,4 @@
-#!/home/gslee/llm-api-vault/venv/bin/python3
+#!/home/gslee/shellm/venv/bin/python3
 """SheLLM Research Engine -- GPT-5 Mini for web research, summarization, and fact-finding."""
 
 from base_chat import BaseChatClient

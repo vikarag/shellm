@@ -1,4 +1,4 @@
-#!/home/gslee/llm-api-vault/venv/bin/python3
+#!/home/gslee/shellm/venv/bin/python3
 """Telegram bot adapter for LLM chat clients with streaming, vision, and file handling."""
 
 import asyncio

@@ -1,4 +1,4 @@
-#!/home/gslee/llm-api-vault/venv/bin/python3
+#!/home/gslee/shellm/venv/bin/python3
 """Base chat client for LLM API Vault - shared logic for all model-specific scripts."""
 
 import argparse
@@ -43,7 +43,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read a file from the project directory (~/llm-api-vault/) with line numbers. Can read source code, configs, etc. Use offset and limit for large files.",
+            "description": "Read a file from the project directory (~/shellm/) with line numbers. Can read source code, configs, etc. Use offset and limit for large files.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -286,7 +286,7 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "prompt": {"type": "string", "description": "The task or instruction for Claude Code"},
-                    "working_directory": {"type": "string", "description": "Directory to run in (default: ~/llm-api-vault)"},
+                    "working_directory": {"type": "string", "description": "Directory to run in (default: ~/shellm)"},
                 },
                 "required": ["prompt"],
             },
@@ -723,7 +723,7 @@ class BaseChatClient:
             "IMPORTANT: Only use claude_code when the user explicitly asks to use Claude Code or Claude. "
             "For all other coding tasks, use run_command and file tools directly.\n\n"
             "Proactively save useful information about the user to memory for future sessions.\n\n"
-            "SELF-AWARENESS: Your own source code lives at ~/llm-api-vault/. You ARE SheLLM — "
+            "SELF-AWARENESS: Your own source code lives at ~/shellm/. You ARE SheLLM — "
             "when the user mentions 'your backend', 'your code', or 'your system', they mean YOUR files. "
             "Key files:\n"
             "  - base_chat.py — your core engine (tools, streaming, prompt processing)\n"
@@ -740,7 +740,7 @@ class BaseChatClient:
             "  - cron_manager.py — cron job management\n"
             "  - daemon_mode.py — stdin/file/socket daemon modes\n"
             "  - workspace/ — your project directory for creating files and output\n"
-            "You can use run_command to: read your own source (`cat ~/llm-api-vault/base_chat.py`), "
+            "You can use run_command to: read your own source (`cat ~/shellm/base_chat.py`), "
             "check git status/diff/log, view your Telegram bot logs (`cat /tmp/shellm_bot.log`), "
             "list files, inspect your memory.json, and manage your own processes. "
             "You can also modify your own config files in workspace/ or create projects there. "
@@ -827,6 +827,29 @@ class BaseChatClient:
                 answer = re.sub(r"<｜DSML｜function_calls>.*?</｜DSML｜function_calls>", "", answer, flags=re.DOTALL).strip()
                 answer = re.sub(r"<｜DSML｜[^>]*>", "", answer).strip()
 
+            # If still no answer after all attempts, build a diagnostic
+            if not answer and self._current_tool_calls:
+                tool_errors = []
+                for msg in messages:
+                    if msg.get("role") == "tool":
+                        content = msg.get("content", "")
+                        if any(kw in content for kw in (
+                            "Error", "error", "BLOCKED", "not found",
+                            "timed out", "Path escapes", "Traceback",
+                        )):
+                            tool_errors.append(content[:300])
+
+                lines = [f"I used {len(self._current_tool_calls)} tool calls without producing a final answer.\n"]
+                lines.append("Tools called:")
+                for tc in self._current_tool_calls:
+                    args_brief = json.dumps(tc.get("args", {}), ensure_ascii=False)[:120]
+                    lines.append(f"  - {tc['tool']}({args_brief})")
+                if tool_errors:
+                    lines.append("\nErrors encountered:")
+                    for err in tool_errors[-3:]:
+                        lines.append(f"  >> {err}")
+                answer = "\n".join(lines)
+
             if answer:
                 messages.append({"role": "assistant", "content": answer})
 
@@ -839,7 +862,7 @@ class BaseChatClient:
             self._log_chat(original_input, None, duration_ms, error=e)
             self._print(f"\nError: {e}\n")
             messages.pop()
-            return None
+            return f"Error: {e}"
 
     # ── Interactive loop ────────────────────────────────────────────
 

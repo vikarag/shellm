@@ -1,4 +1,4 @@
-#!/home/gslee/llm-api-vault/venv/bin/python3
+#!/home/gslee/shellm/venv/bin/python3
 """Daemon mode for LLM chat clients -- stdin pipe, file, and Unix socket modes."""
 
 import json

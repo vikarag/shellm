@@ -1,4 +1,4 @@
-#!/home/gslee/llm-api-vault/venv/bin/python3
+#!/home/gslee/shellm/venv/bin/python3
 """SheLLM Code Engine -- Kimi K2.5 for code generation, analysis, and refactoring."""
 
 from base_chat import BaseChatClient
