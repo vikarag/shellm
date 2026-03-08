@@ -25,13 +25,13 @@ shellm is built around the most cost-effective LLM APIs available today:
 
 | Engine | Model | Input | Output | Typical monthly cost |
 |--------|-------|-------|--------|---------------------|
-| **Chat** | DeepSeek V3 | $0.27/M tokens | $1.10/M tokens | ~$0.10 |
-| **Code** | Kimi K2.5 | $0.35/M tokens | $1.40/M tokens | ~$0.15 |
-| **Research** | GPT-5 Mini | $1.25/M tokens | $5.00/M tokens | ~$0.50 |
+| **Chat** | DeepSeek V3 | $0.27/M tokens | $1.10/M tokens | ~$0.30 |
+| **Code** | Kimi K2.5 | $0.35/M tokens | $1.40/M tokens | ~$0.45 |
+| **Research** | GPT-5 Mini | $1.25/M tokens | $5.00/M tokens | ~$1.50 |
 
-**Total: under $1/month for typical personal use** (a few dozen queries per day).
+**Total: ~$2-3/month for typical personal use** (a few dozen queries per day).
 
-For comparison, Claude Pro or ChatGPT Plus subscriptions cost $20/month. shellm gives you three specialized engines with tool calling, web search, persistent memory, and Telegram access -- for a fraction of the cost, with no subscription lock-in. You pay only for what you use.
+For comparison, Claude Pro or ChatGPT Plus subscriptions cost $20/month. shellm gives you three specialized engines with tool calling, web search, persistent memory, file editing, RAG, and Telegram access -- for a fraction of the cost, with no subscription lock-in. You pay only for what you use.
 
 ## Three Engines
 
