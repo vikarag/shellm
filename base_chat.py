@@ -8,6 +8,9 @@ import sys
 import time
 from datetime import datetime, timezone, timedelta
 
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+
 from openai import OpenAI
 from web_search import search, fetch_page, format_results
 from cron_manager import cron_list, cron_create, cron_delete
@@ -197,6 +200,7 @@ class BaseChatClient:
         self._silent = False
         self._current_tool_calls = []
         self._mode = "interactive"
+        self._on_token = None  # callback(accumulated_text) for streaming consumers
 
     def _print(self, *args, **kwargs):
         if not self._silent:
@@ -401,6 +405,8 @@ class BaseChatClient:
                     self._print("\nAssistant: ", end="")
                 self._print(delta.content, end="", flush=True)
                 answer_chunks.append(delta.content)
+                if self._on_token:
+                    self._on_token("".join(answer_chunks))
 
         if tool_calls_data:
             return None, tool_calls_data
@@ -431,21 +437,18 @@ class BaseChatClient:
     # ── Core prompt processing ──────────────────────────────────────
 
     def _ensure_system_message(self, messages):
+        now = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
+        system_content = (
+            f"You are shellm, a helpful AI assistant. Current date/time: {now} (Asia/Seoul, UTC+9). "
+            "You have persistent shared memory (use memory_read at the start of a conversation to recall "
+            "who you are and what you know about the user). You can search the web, execute shell commands, "
+            "manage cron jobs, and review past chat logs with chat_log_read. "
+            "Proactively save useful information about the user to memory for future sessions."
+        )
         if not messages or messages[0].get("role") != "system":
-            now = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
-            messages.insert(0, {
-                "role": "system",
-                "content": (
-                    f"Current date/time: {now} (Asia/Seoul, UTC+9). "
-                    "You have access to chat_log_read to review past conversations across all models."
-                ),
-            })
+            messages.insert(0, {"role": "system", "content": system_content})
         else:
-            now = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
-            messages[0]["content"] = (
-                f"Current date/time: {now} (Asia/Seoul, UTC+9). "
-                "You have access to chat_log_read to review past conversations across all models."
-            )
+            messages[0]["content"] = system_content
 
     def process_prompt(self, user_input, messages):
         original_input = user_input
