@@ -11,6 +11,6 @@
   </g>
   <!-- SheLLM text -->
   <text x="110" y="72" font-family="'Segoe UI','Helvetica Neue',Arial,sans-serif" font-size="48" font-weight="600" fill="#2D3436">
-    <tspan fill="#F4A261">She</tspan><tspan font-weight="800">LLM</tspan>
+    <tspan fill="#F4A261">She</tspan><tspan fill="#F4A261" font-weight="800">L</tspan><tspan font-weight="800">LM</tspan>
   </text>
 </svg>
