@@ -221,77 +221,20 @@ class TelegramAdapter:
             for chunk in split_message(text):
                 await message.reply_text(chunk)
 
-    def _process_streaming(self, text, messages, token_queue):
-        """Run blocking process_prompt with a token callback that feeds an asyncio queue."""
-        def on_token(accumulated):
-            token_queue.put_nowait(accumulated)
-
-        self.client._on_token = on_token
-        try:
-            answer = self.client.process_prompt(text, messages)
-        finally:
-            self.client._on_token = None
-        token_queue.put_nowait(None)
-        return answer
-
     async def handle_message_streaming(self, chat_id, text, bot):
-        """Handle a message with streaming draft updates."""
+        """Handle a message: run LLM in background thread, return final answer."""
         messages = self.get_or_create_session(chat_id)
 
-        token_queue = asyncio.Queue()
-        draft_id = int(time.time() * 1000) % (2**31 - 1)
-
         loop = asyncio.get_event_loop()
-        process_task = loop.run_in_executor(
-            None, self._process_streaming, text, messages, token_queue
+        final_answer = await loop.run_in_executor(
+            None, self.client.process_prompt, text, messages
         )
-
-        last_draft_time = 0
-        last_draft_text = ""
-
-        while True:
-            try:
-                accumulated = await asyncio.wait_for(token_queue.get(), timeout=120)
-            except asyncio.TimeoutError:
-                break
-
-            if accumulated is None:
-                break
-
-            now = time.time()
-            if now - last_draft_time >= 0.5 and accumulated != last_draft_text:
-                try:
-                    await bot.send_message_draft(
-                        chat_id=chat_id,
-                        draft_id=draft_id,
-                        text=accumulated[:4096],
-                    )
-                    last_draft_text = accumulated
-                    last_draft_time = now
-                except Exception:
-                    pass
-
-        final_answer = await process_task or "(No response)"
-
-        # Send a final draft with the complete text
-        if final_answer != last_draft_text:
-            try:
-                await bot.send_message_draft(
-                    chat_id=chat_id,
-                    draft_id=draft_id,
-                    text=final_answer[:4096],
-                )
-            except Exception:
-                pass
 
         # Persist session after processing
         self.sessions[chat_id] = self._trim_session(messages)
         self._save_sessions()
 
-        # Return None if fully shown in draft, so caller skips re-send
-        if len(final_answer) <= 4096:
-            return None
-        return final_answer
+        return final_answer or "(No response)"
 
     def _analyze_image(self, b64_data, prompt):
         """Send image to GPT-5 Mini for vision analysis."""
@@ -339,8 +282,7 @@ class TelegramAdapter:
             await update.message.chat.send_action(ChatAction.TYPING)
             try:
                 response = await adapter.handle_message_streaming(chat_id, text, bot)
-                if response:
-                    await adapter._send_response(update.message, response)
+                await adapter._send_response(update.message, response)
             except Exception as e:
                 await update.message.reply_text(f"Error: {e}")
 
@@ -430,8 +372,7 @@ class TelegramAdapter:
             bot = context.bot
             try:
                 response = await adapter.handle_message_streaming(chat_id, prompt, bot)
-                if response:
-                    await adapter._send_response(update.message, response)
+                await adapter._send_response(update.message, response)
             except Exception as e:
                 await update.message.reply_text(f"Error: {e}")
 
@@ -489,8 +430,7 @@ class TelegramAdapter:
                 response = await adapter.handle_message_streaming(
                     chat_id, f"/search {query}", bot
                 )
-                if response:
-                    await adapter._send_response(update.message, response)
+                await adapter._send_response(update.message, response)
             except Exception as e:
                 await update.message.reply_text(f"Error: {e}")
 
@@ -513,8 +453,7 @@ class TelegramAdapter:
                 f"Save this to memory using memory_write: {text}",
                 bot,
             )
-            if response:
-                await adapter._send_response(update.message, response)
+            await adapter._send_response(update.message, response)
 
         async def _on_recall(update: Update, context):
             keyword = " ".join(context.args) if context.args else ""
