@@ -2,53 +2,59 @@
   <img src="shellm-logo.svg" alt="SheLLM" width="360">
 </p>
 
-A lightweight [OpenClaw](https://github.com/openclaw) alternative. One base class, 24 built-in tools + MCP extensibility, extend in 15 lines.
+A lightweight [OpenClaw](https://github.com/openclaw) alternative. Nine specialized agents, 28 built-in tools, MCP extensibility, config-driven.
 
-**SheLLM** (pronounced *shell-el-em*) is a minimal CLI chat framework for tool-using LLMs. It gives any OpenAI-compatible model web search, shell access, cron scheduling, task scheduling, persistent memory, file editing, RAG document search, chat logging, and MCP server integration -- out of the box, with zero config.
+**SheLLM** (pronounced *shell-el-em*) is a multi-agent CLI framework for tool-using LLMs. A single entry point (`shellm.py`) routes work across nine purpose-built agents -- covering conversation, reasoning, vision, web search, academic research, and MCP server integration -- out of the box, with zero config beyond API keys.
 
 ```bash
-echo "Summarize today's news" | ./gpt5mini_chat.py --daemon stdin
+echo "Summarize today's news" | ./shellm.py --daemon stdin
 ```
 
 ## Why SheLLM?
 
 | | OpenClaw | SheLLM |
 |---|---------|--------|
-| Setup | Config files, plugin system, dependencies | One Python class. `pip install openai numpy` |
-| Add a model | Write adapter, register, configure | 15 lines: subclass, set 3 attributes, done |
+| Setup | Config files, plugin system, dependencies | `pip install -r requirements.txt`, fill `.env` |
+| Add an agent | Write adapter, register, configure | Add a stanza to `agent_config.yaml` |
 | Tool system | Plugin architecture | Built-in: search, shell, cron, memory, chat logs, MCP |
-| Modes | Interactive | Interactive, daemon (stdin/file/socket), Telegram |
-| Footprint | Heavy | ~500 lines of core code |
+| Modes | Interactive | Interactive, daemon (stdin/file/socket), Telegram, API server |
+| Footprint | Heavy | Modular packages (`agents/`, `tools/`) |
 | **API cost** | Depends on model choice | **~$3/month** typical usage (see below) |
 
 ## Cost-Effective by Design
 
-SheLLM is built around the most cost-effective LLM APIs available today:
+SheLLM runs nine agents across two cost-effective providers:
 
-| Engine | Model | Input | Output | Typical monthly cost |
-|--------|-------|-------|--------|---------------------|
-| **Chat** | DeepSeek V3 | $0.27/M tokens | $1.10/M tokens | ~$0.30 |
-| **Code** | Kimi K2.5 | $0.35/M tokens | $1.40/M tokens | ~$0.45 |
-| **Research** | GPT-5 Mini | $1.25/M tokens | $5.00/M tokens | ~$1.50 |
+| Agent(s) | Provider | Model | Input | Output | Typical monthly cost |
+|----------|----------|-------|-------|--------|---------------------|
+| chat, updater, mcp-alpha/beta/gamma, reasoner | DeepSeek | deepseek-chat / deepseek-reasoner | $0.27/M | $1.10/M | ~$1.00 |
+| image, websearch, researcher | OpenAI | gpt-5-mini | $1.25/M | $5.00/M | ~$2.00 |
 
 **Total: ~$3/month for typical personal use** (a few dozen queries per day).
 
-For comparison, Claude Pro or ChatGPT Plus subscriptions cost $20/month. SheLLM gives you three specialized engines with tool calling, web search, persistent memory, file editing, RAG, and Telegram access -- for a fraction of the cost, with no subscription lock-in. You pay only for what you use.
+For comparison, Claude Pro or ChatGPT Plus subscriptions cost $20/month. SheLLM gives you nine specialized agents with tool calling, web search, vision, persistent memory, file editing, RAG, and Telegram access -- for a fraction of the cost, with no subscription lock-in. You pay only for what you use. Each agent uses its own API key to distribute load.
 
-## Three Engines
+## Nine Agents
 
-SheLLM ships with three purpose-built engines, each chosen for its strength:
+SheLLM ships with nine purpose-built agents, each chosen for its strength:
 
-| Engine | Script | Model | Role |
-|--------|--------|-------|------|
-| **Chat** | `deepseek_chat.py` | DeepSeek | General conversation, reasoning, thinking mode |
-| **Code** | `kimi_chat.py` | Kimi K2.5 | Code generation, analysis, refactoring (CoT) |
-| **Research** | `gpt5mini_chat.py` | GPT-5 Mini | Web research, summarization, fact-finding |
+| Agent | Provider | Model | Role |
+|-------|----------|-------|------|
+| `shellm-chat` | DeepSeek | `deepseek-chat` | Main conversational agent, tool router |
+| `shellm-updater` | DeepSeek | `deepseek-chat` | Observes progress, replies while chat is busy |
+| `shellm-mcp-alpha` | DeepSeek | `deepseek-chat` | MCP server group A |
+| `shellm-mcp-beta` | DeepSeek | `deepseek-chat` | MCP server group B |
+| `shellm-mcp-gamma` | DeepSeek | `deepseek-chat` | MCP server group C |
+| `shellm-reasoner` | DeepSeek | `deepseek-reasoner` | Deep reasoning / plan mode |
+| `shellm-image` | OpenAI | `gpt-5-mini` | Image recognition (vision) |
+| `shellm-websearch` | OpenAI | `gpt-5-mini` | Live web search |
+| `shellm-researcher` | OpenAI | `gpt-5-mini` | Academic research |
 
 ```bash
-./deepseek_chat.py    # Chat -- ask anything
-./kimi_chat.py        # Code -- write and review code
-./gpt5mini_chat.py    # Research -- search the web and synthesize answers
+./shellm.py                             # Chat -- default agent (shellm-chat)
+./shellm.py --agent shellm-reasoner     # Deep reasoning / plan mode
+./shellm.py --agent shellm-researcher   # Academic research
+./shellm.py --list-agents               # Show all configured agents
 ```
 
 ## Quick Start
@@ -61,36 +67,35 @@ pip install -r requirements.txt
 
 # Copy .env.example and fill in your keys
 cp .env.example .env
-# Edit .env with your API keys (at least one)
+# Edit .env with your API keys (DeepSeek + OpenAI)
 
-./deepseek_chat.py
+./shellm.py
 ```
 
-## Add Your Own Engine (15 lines)
+## Add Your Own Agent
 
-```python
-#!/usr/bin/env python3
-from base_chat import BaseChatClient
+Agents are declared in `agent_config.yaml`. Add a stanza and restart -- no code changes needed:
 
-class MyChat(BaseChatClient):
-    MODEL = "my-model-id"
-    BANNER_NAME = "My Engine"
-    ENV_VAR = "MY_API_KEY"
-    BASE_URL = "https://api.example.com/v1"  # omit for OpenAI
-
-if __name__ == "__main__":
-    MyChat().run()
+```yaml
+agents:
+  - name: shellm-myagent
+    provider: deepseek          # or: openai
+    model: deepseek-chat
+    api_key_env: MY_API_KEY
+    base_url: https://api.example.com/v1
+    tool_set: full              # full | minimal | mcp_only | none
+    system_prompt: |
+      You are a specialist in ...
 ```
 
-Override `build_params()` for custom behavior (see `deepseek_chat.py` and `kimi_chat.py` for examples).
+For custom behavior beyond config (e.g., a new agent class), add a spec under `agents/specs/` and register it in `agents/registry.py`.
 
-## Built-in Tools (27)
+## Built-in Tools (28)
 
-Every engine gets all of these automatically:
+Every agent gets its assigned tool set automatically:
 
 | Tool | What it does |
 |------|-------------|
-| `web_research` | Web search and synthesis via GPT-5 Mini (native web search) |
 | `read_file` | Read files from the project directory with line numbers |
 | `write_file` | Write or append to files in workspace/ |
 | `list_directory` | List files and directories in workspace/ with sizes |
@@ -110,23 +115,36 @@ Every engine gets all of these automatically:
 | `memory_read` | Read stored memories |
 | `memory_search` | Search memories by keyword (FTS5 full-text search) |
 | `memory_delete` | Delete a memory entry |
-| `chat_log_read` | Query past conversations across all engines |
-| `claude_code` | Delegate complex coding tasks to Claude Code (AI coding agent) |
-| `kimi_code` | Auto-delegate technical tasks to Kimi K2.5 (coding, sysadmin, installs) |
+| `chat_log_read` | Query past conversations across all agents |
 | `send_file` | Send files (images, documents) to the user via Telegram |
-| `report_progress` | Send real-time progress updates during plan execution (via GPT-5 Nano) |
+| `report_progress` | Send real-time progress updates via the updater agent |
 | `mcp_list_servers` | List configured MCP servers and connection status |
 | `mcp_list_tools` | List tools available from MCP servers |
+| `delegate_websearch` | Delegate live web search to `shellm-websearch` |
+| `delegate_image` | Delegate image recognition to `shellm-image` |
+| `delegate_research` | Delegate academic research to `shellm-researcher` |
+| `delegate_reason` | Delegate deep reasoning / planning to `shellm-reasoner` |
 
 The model decides when to use them. Up to 20 tool-call rounds per turn.
 
+Named tool sets (`tool_sets.py`) control which tools each agent receives: `full` (all 28), `minimal` (core file/memory/shell), `mcp_only` (MCP tools only), `none`.
+
 ### Auto-Delegation
 
-The Chat engine (DeepSeek) automatically delegates technical tasks to the Code engine (Kimi K2.5) via the `kimi_code` tool. This includes coding, debugging, package installation, system administration, and server configuration. No manual switching needed — DeepSeek recognizes technical work and routes it to Kimi autonomously.
+`shellm-chat` automatically delegates specialized work to the right agent via delegation tools:
+
+| Trigger | Tool | Target agent |
+|---------|------|--------------|
+| Web lookup, current events | `delegate_websearch` | `shellm-websearch` |
+| Image or screenshot | `delegate_image` | `shellm-image` |
+| Academic paper, deep research | `delegate_research` | `shellm-researcher` |
+| Multi-step plan, hard reasoning | `delegate_reason` | `shellm-reasoner` |
+
+No manual switching needed. The chat agent recognizes the task type and routes it autonomously. When the chat agent is busy executing a multi-step plan, `shellm-updater` observes the progress queue and replies to incoming messages so the user is never left waiting.
 
 ## MCP Server Support
 
-SheLLM supports [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) — connect external tool servers without changing code. Any MCP server (filesystem, databases, APIs, etc.) can extend SheLLM's capabilities dynamically.
+SheLLM supports [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) -- connect external tool servers without changing code. MCP servers are distributed across three dedicated agents (`shellm-mcp-alpha`, `shellm-mcp-beta`, `shellm-mcp-gamma`) to isolate server groups and avoid tool-count limits.
 
 ```bash
 # Create mcp_servers.json (Claude Desktop format):
@@ -143,15 +161,15 @@ cat > mcp_servers.json << 'EOF'
 EOF
 ```
 
-MCP tools are namespaced as `{server}__{tool}` (e.g., `filesystem__read_file`) to avoid collisions with built-in tools. Servers connect lazily on first use. Missing config, failed servers, or missing SDK = no crash, just no MCP tools.
+MCP tools are namespaced as `{server}__{tool}` (e.g., `filesystem__read_file`) to avoid collisions with built-in tools. Servers connect lazily on first use. Missing config, failed servers, or missing SDK = no crash, just no MCP tools. Assign servers to alpha/beta/gamma agents in `agent_config.yaml` to spread load.
 
 ## Telegram Bot
 
-SheLLM runs natively as a Telegram bot with real-time streaming, HTML-formatted responses, and persistent sessions (conversations survive bot restarts).
+SheLLM runs natively as a Telegram bot with real-time streaming, HTML-formatted responses, and persistent sessions (conversations survive bot restarts). Incoming images are automatically routed to `shellm-image`; `/plan` commands are routed to `shellm-reasoner`; messages arriving while the chat agent is busy are handled by `shellm-updater`.
 
 ```bash
 # Set your bot token in .env, then:
-./deepseek_chat.py --telegram
+./shellm.py --telegram
 ```
 
 **Bot commands:** `/search`, `/plan`, `/memory`, `/remember`, `/recall`, `/usage`, `/files`, `/download`, `/logs`, `/model`, `/clear`, `/forget`, `/help`
@@ -160,101 +178,152 @@ SheLLM runs natively as a Telegram bot with real-time streaming, HTML-formatted 
 
 The `/plan` command lets you preview an execution plan before running a task:
 
-1. Send `/plan <task>` — the bot generates a step-by-step plan with tools and delegation strategy
+1. Send `/plan <task>` -- routed to `shellm-reasoner` for a step-by-step plan with tools and delegation strategy
 2. Reply **yes** to execute, **no** to cancel, or send feedback to revise the plan
-3. Feedback is iterative — keep refining until the plan looks right, then approve
+3. Feedback is iterative -- keep refining until the plan looks right, then approve
 
-During execution, the LLM calls `report_progress` after each major step. A background thread sends the step info to GPT-5 Nano, which summarizes it in 1-2 sentences and delivers a Telegram notification — so you get real-time visibility into multi-step plans without blocking execution.
-
-Plan mode also maximizes engine utilization: the Chat engine (DeepSeek) orchestrates the plan while automatically delegating research and data gathering to GPT-5 Mini (`web_research`) and coding/implementation tasks to Kimi K2.5 (`kimi_code`). This multi-engine approach produces higher quality results than any single model alone.
+During execution, the chat agent calls `report_progress` after each major step. The progress queue delivers updates to `shellm-updater`, which summarizes and sends a Telegram notification -- real-time visibility into multi-step plans without blocking execution.
 
 ```
 You:  /plan install htop and verify it works
 Bot:  [Plan with steps, tools, complexity]
 You:  yes
-Bot:  [Plan Progress 1/3] ✓ Installed htop via apt-get...
-Bot:  [Plan Progress 2/3] ✓ Verified htop runs and displays process list...
+Bot:  [Plan Progress 1/3] Installed htop via apt-get...
+Bot:  [Plan Progress 2/3] Verified htop runs and displays process list...
 Bot:  [Final response with full results]
 ```
 
-Progress updates are best-effort — if the summarization or Telegram delivery fails, execution continues unaffected. In CLI mode, `report_progress` is a silent no-op.
+Progress updates are best-effort -- if delivery fails, execution continues unaffected. In CLI mode, `report_progress` is a silent no-op.
 
 Responses are automatically converted from Markdown to Telegram HTML with proper code blocks, bold, italic, links, and blockquotes.
+
+## Web UI
+
+SheLLM exposes an OpenAI-compatible API server for use with [Open WebUI](https://github.com/open-webui/open-webui) or any OpenAI-compatible frontend.
+
+```bash
+# Start the API server
+python api_server.py
+
+# Or with uvicorn directly
+uvicorn api_server:app --host 0.0.0.0 --port 8000
+```
+
+The server (`api_server.py`) is a FastAPI/uvicorn application that implements the `/v1/chat/completions` endpoint. Each configured agent appears as a selectable model in the UI. The production instance is accessible at `shellm.gsl.ee`.
 
 ## Run Modes
 
 ```bash
-# Interactive (default)
-./deepseek_chat.py
+# Interactive (default agent: shellm-chat)
+./shellm.py
+
+# Specific agent
+./shellm.py --agent shellm-reasoner
+
+# List all configured agents
+./shellm.py --list-agents
 
 # Pipe a prompt
-echo "What is 2+2?" | ./deepseek_chat.py --daemon stdin
+echo "What is 2+2?" | ./shellm.py --daemon stdin
 
 # JSON output
-echo "What is 2+2?" | ./deepseek_chat.py --daemon stdin --json
+echo "What is 2+2?" | ./shellm.py --daemon stdin --json
 
 # Batch from file
-./gpt5mini_chat.py --daemon file --input prompts.txt --output responses.txt
+./shellm.py --daemon file --input prompts.txt --output responses.txt
 
 # Unix socket server (concurrent access)
-./deepseek_chat.py --daemon socket --socket-path /tmp/deepseek.sock
+./shellm.py --daemon socket --socket-path /tmp/shellm.sock
 
 # Telegram bot
-./deepseek_chat.py --telegram
+./shellm.py --telegram
+
+# API server (Open WebUI / any OpenAI-compatible frontend)
+python api_server.py
 ```
 
 ## Interactive Commands
 
 | Command | Action |
 |---------|--------|
-| `/search <query>` | Force a web research workflow |
+| `/search <query>` | Force a web search workflow |
 | `clear` | Reset conversation history |
 | `quit` / `exit` | End session |
 
 ## Chat Logging
 
 Every conversation turn is automatically saved to `chat_logs.json` with:
-- Timestamp (KST/UTC+9), model name, run mode
+- Timestamp (KST/UTC+9), agent name, run mode
 - Full user input and assistant response
 - All tool calls made during the turn
 - Response duration in milliseconds
 
-The LLM can read its own past logs via the `chat_log_read` tool.
+Any agent can read past logs via the `chat_log_read` tool.
 
 ## Architecture
 
 ```
-BaseChatClient (base_chat.py, ~1000 loc)
-  |-- 27 built-in tools + MCP dynamic tools
-  |-- Auto-delegation: DeepSeek → Kimi K2.5 for technical tasks
-  |-- File delivery: send_file for Telegram media/document sending
-  |-- Streaming + batch response handling
-  |-- Optional reasoning/thinking display
-  |-- Self-aware system prompt (knows its own codebase)
-  |-- Chat logging (chat_logs.json)
-  |-- System timezone awareness (KST)
-  |-- Daemon mode (daemon_mode.py)
-  +-- Telegram adapter (telegram_adapter.py + telegram_format.py)
-        +-- Persistent sessions (telegram_sessions.json)
+shellm.py                  -- unified entry point (interactive, daemon, telegram, agent select)
+agent_config.yaml          -- declarative agent definitions (provider, model, tool_set, prompt)
+api_server.py              -- OpenAI-compatible API server (FastAPI/uvicorn) for Open WebUI
+
+agents/
+  config.py                -- AgentConfig dataclass + YAML loader
+  registry.py              -- AgentRegistry singleton, lazy agent creation
+  base_agent.py            -- BaseAgent (streaming, tool loop, chat logging)
+  progress.py              -- Thread-safe ProgressQueue (chat -> updater)
+  specs/
+    chat.py                -- ChatAgent       (primary router)
+    updater.py             -- UpdaterAgent    (progress-aware, handles busy state)
+    mcp_agent.py           -- MCPAgent        (filtered MCP server group)
+    reasoner.py            -- ReasonerAgent   (no tools, deep reasoning)
+    image.py               -- ImageAgent      (vision API)
+    websearch.py           -- WebSearchAgent  (web_search tool)
+    researcher.py          -- ResearcherAgent (academic focus)
+
+tools/
+  definitions.py           -- 28 tool definitions (JSON schema)
+  executor.py              -- dispatch table + execute_tool()
+  tool_sets.py             -- named subsets: full | minimal | mcp_only | none
+
+telegram_adapter.py        -- Telegram bot (AgentRegistry-based, image/plan/busy routing)
+daemon_mode.py             -- daemon modes (stdin, file, socket)
+telegram_format.py         -- Markdown -> Telegram HTML
 
 Modules:
-  |-- db.py              Shared SQLite database (WAL mode, FTS5, thread-safe)
-  |-- file_tools.py      File ops (read from project dir, write/list/search in workspace/)
-  |-- task_scheduler.py   Heartbeat scheduler for delayed tasks (60s tick, SQLite-backed)
-  |-- rag_engine.py      Document indexing + hybrid search (cosine + BM25)
-  |-- command_runner.py   Shell command execution
-  |-- cron_manager.py     Cron job management
-  |-- memory_manager.py   Persistent shared memory (SQLite + FTS5 + auto-archival)
-  +-- mcp_manager.py      MCP server connections + tool routing (async bridge)
-
-Engines: 15-50 lines each
-  |-- deepseek_chat.py   Chat    (DeepSeek, +reasoner conditional logic)
-  |-- kimi_chat.py       Code    (Kimi K2.5, +thinking mode toggle)
-  |-- gpt5mini_chat.py   Research (GPT-5 Mini, config only + web search delegate)
-  +-- gpt5nano_chat.py   Background (GPT-5 Nano, plan progress summarization)
+  db.py                    -- Shared SQLite database (WAL mode, FTS5, thread-safe)
+  file_tools.py            -- File ops (read from project dir, write/list/search in workspace/)
+  task_scheduler.py        -- Heartbeat scheduler for delayed tasks (60s tick, SQLite-backed)
+  rag_engine.py            -- Document indexing + hybrid search (cosine + BM25)
+  command_runner.py        -- Shell command execution
+  cron_manager.py          -- Cron job management
+  memory_manager.py        -- Persistent shared memory (SQLite + FTS5 + auto-archival)
+  mcp_manager.py           -- MCP server connections + tool routing (async bridge)
 
 SheLLM.db    -- single SQLite database for memory + RAG (WAL mode)
 workspace/   -- SheLLM's project directory for file output
+```
+
+Agent routing overview:
+
+```
+User input
+    |
+shellm.py
+    |
+    +-- text query ---------> shellm-chat
+    |                              |-- delegate_websearch --> shellm-websearch
+    |                              |-- delegate_image     --> shellm-image
+    |                              |-- delegate_research  --> shellm-researcher
+    |                              |-- delegate_reason    --> shellm-reasoner
+    |                              +-- report_progress   --> shellm-updater (via ProgressQueue)
+    |
+    +-- image attached -----> shellm-image
+    +-- /plan command ------> shellm-reasoner
+    +-- --agent <name> -----> any agent directly
+    +-- api_server.py ------> any agent (model selector in web UI)
+
+MCP servers --> shellm-mcp-alpha / shellm-mcp-beta / shellm-mcp-gamma
 ```
 
 ## License
