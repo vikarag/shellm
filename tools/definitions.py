@@ -18,6 +18,21 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "fetch_page",
+            "description": "Fetch and read the full content of a specific web page URL. Returns the visible text of the page. Use this when you have a specific URL to read (e.g. from search results, user-provided links). For discovering pages, use delegate_websearch instead.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "The URL to fetch and extract text from"},
+                    "wait_for": {"type": "string", "description": "Optional CSS selector to wait for before extracting (for JS-rendered content)"},
+                },
+                "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "delegate_image",
             "description": "Analyze an image using the vision agent. Send base64-encoded image data and a prompt.",
             "parameters": {

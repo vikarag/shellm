@@ -2,7 +2,7 @@
   <img src="shellm-logo.svg" alt="SheLLM" width="360">
 </p>
 
-A lightweight [OpenClaw](https://github.com/openclaw) alternative. Nine specialized agents, 28 built-in tools, MCP extensibility, config-driven.
+A lightweight [OpenClaw](https://github.com/openclaw) alternative. Nine specialized agents, 29 built-in tools, MCP extensibility, config-driven.
 
 **SheLLM** (pronounced *shell-el-em*) is a multi-agent CLI framework for tool-using LLMs. A single entry point (`shellm.py`) routes work across nine purpose-built agents -- covering conversation, reasoning, vision, web search, academic research, and MCP server integration -- out of the box, with zero config beyond API keys.
 
@@ -90,7 +90,7 @@ agents:
 
 For custom behavior beyond config (e.g., a new agent class), add a spec under `agents/specs/` and register it in `agents/registry.py`.
 
-## Built-in Tools (28)
+## Built-in Tools (29)
 
 Every agent gets its assigned tool set automatically:
 
@@ -120,6 +120,7 @@ Every agent gets its assigned tool set automatically:
 | `report_progress` | Send real-time progress updates via the updater agent |
 | `mcp_list_servers` | List configured MCP servers and connection status |
 | `mcp_list_tools` | List tools available from MCP servers |
+| `fetch_page` | Fetch and read full content of a specific URL (camoufox browser, urllib fallback) |
 | `delegate_websearch` | Delegate live web search to `shellm-websearch` |
 | `delegate_image` | Delegate image recognition to `shellm-image` |
 | `delegate_research` | Delegate academic research to `shellm-researcher` |
@@ -127,7 +128,7 @@ Every agent gets its assigned tool set automatically:
 
 The model decides when to use them. Up to 20 tool-call rounds per turn.
 
-Named tool sets (`tool_sets.py`) control which tools each agent receives: `full` (all 28), `minimal` (core file/memory/shell), `mcp_only` (MCP tools only), `none`.
+Named tool sets (`tool_sets.py`) control which tools each agent receives: `full` (all 29), `minimal` (core file/memory/shell), `mcp_only` (MCP tools only), `none`.
 
 ### Auto-Delegation
 
@@ -136,6 +137,7 @@ Named tool sets (`tool_sets.py`) control which tools each agent receives: `full`
 | Trigger | Tool | Target agent |
 |---------|------|--------------|
 | Web lookup, current events | `delegate_websearch` | `shellm-websearch` |
+| Specific URL to read | `fetch_page` | *(local — camoufox browser)* |
 | Image or screenshot | `delegate_image` | `shellm-image` |
 | Academic paper, deep research | `delegate_research` | `shellm-researcher` |
 | Multi-step plan, hard reasoning | `delegate_reason` | `shellm-reasoner` |
@@ -282,7 +284,7 @@ agents/
     researcher.py          -- ResearcherAgent (academic focus)
 
 tools/
-  definitions.py           -- 28 tool definitions (JSON schema)
+  definitions.py           -- 29 tool definitions (JSON schema)
   executor.py              -- dispatch table + execute_tool()
   tool_sets.py             -- named subsets: full | minimal | mcp_only | none
 
@@ -291,6 +293,7 @@ daemon_mode.py             -- daemon modes (stdin, file, socket)
 telegram_format.py         -- Markdown -> Telegram HTML
 
 Modules:
+  browser_engine.py        -- Singleton camoufox browser for fetch_page (urllib fallback)
   db.py                    -- Shared SQLite database (WAL mode, FTS5, thread-safe)
   file_tools.py            -- File ops (read from project dir, write/list/search in workspace/)
   task_scheduler.py        -- Heartbeat scheduler for delayed tasks (60s tick, SQLite-backed)
@@ -313,6 +316,7 @@ shellm.py
     |
     +-- text query ---------> shellm-chat
     |                              |-- delegate_websearch --> shellm-websearch
+    |                              |-- fetch_page         --> browser_engine (camoufox)
     |                              |-- delegate_image     --> shellm-image
     |                              |-- delegate_research  --> shellm-researcher
     |                              |-- delegate_reason    --> shellm-reasoner

@@ -5,3 +5,4 @@ python-dotenv
 python-telegram-bot  # optional: for --telegram mode
 pdfplumber           # optional: PDF text extraction
 python-docx          # optional: DOCX text extraction
+camoufox             # optional: stealthy browser for fetch_page

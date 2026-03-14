@@ -40,6 +40,62 @@ def _exec_delegate_websearch(args, ctx):
     return result
 
 
+def _fallback_fetch(url):
+    """Basic URL fetch via urllib when camoufox is unavailable."""
+    import re as _re
+    import urllib.request
+
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0",
+        })
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+        # Strip HTML tags
+        text = _re.sub(r"<script[^>]*>.*?</script>", "", html, flags=_re.DOTALL | _re.IGNORECASE)
+        text = _re.sub(r"<style[^>]*>.*?</style>", "", text, flags=_re.DOTALL | _re.IGNORECASE)
+        text = _re.sub(r"<[^>]+>", " ", text)
+        text = _re.sub(r"\s+", " ", text).strip()
+        if len(text) > 50_000:
+            text = text[:50_000] + "\n\n[...truncated]"
+        # Extract title
+        title_match = _re.search(r"<title[^>]*>(.*?)</title>", html, _re.IGNORECASE | _re.DOTALL)
+        title = title_match.group(1).strip() if title_match else ""
+        return {"text": text, "title": title, "url": url, "error": None}
+    except Exception as e:
+        return {"text": "", "title": "", "url": url, "error": str(e)}
+
+
+def _exec_fetch_page(args, ctx):
+    """Fetch a web page and extract its text content."""
+    url = args.get("url", "")
+    wait_for = args.get("wait_for")
+    ctx._print(f"[Fetching: {url}...]")
+
+    from browser_engine import BrowserEngine
+
+    if BrowserEngine.is_available():
+        try:
+            engine = BrowserEngine.get_instance()
+            result = engine.fetch_page(url, wait_for_selector=wait_for)
+        except Exception as e:
+            ctx._print(f"[Browser failed, using fallback: {e}]")
+            result = _fallback_fetch(url)
+    else:
+        result = _fallback_fetch(url)
+
+    if result.get("error"):
+        ctx._print(f"[Fetch error: {result['error']}]")
+        return f"Error fetching {url}: {result['error']}"
+
+    ctx._print("[Fetch complete]")
+    title = result.get("title", "")
+    text = result.get("text", "")
+    progress_queue.push("tool_call", "fetch_page", f"URL: {url[:80]}")
+    header = f"Title: {title}\nURL: {result.get('url', url)}\n\n" if title else ""
+    return header + text
+
+
 def _exec_delegate_image(args, ctx):
     """Delegate image analysis to shellm-image agent."""
     b64 = args.get("image_b64", "")
@@ -360,6 +416,7 @@ def _exec_report_progress(args, ctx):
 # Dispatch table
 TOOL_DISPATCH = {
     "delegate_websearch": _exec_delegate_websearch,
+    "fetch_page": _exec_fetch_page,
     "delegate_image": _exec_delegate_image,
     "delegate_research": _exec_delegate_research,
     "delegate_reason": _exec_delegate_reason,

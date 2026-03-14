@@ -265,7 +265,8 @@ class BaseAgent:
 
         if role == "primary":
             system_content = base + (
-                " You can search the web (via delegate_websearch), analyze images (via delegate_image), "
+                " You can search the web (via delegate_websearch), fetch specific web pages (via fetch_page), "
+                "analyze images (via delegate_image), "
                 "conduct research (via delegate_research), and use deep reasoning (via delegate_reason). "
                 "You can execute shell commands, manage cron jobs, read files from the "
                 "project directory (read_file), write/search files in workspace/, and review past chat logs "
@@ -279,6 +280,7 @@ class BaseAgent:
                 "Proactively save useful information about the user to memory for future sessions.\n\n"
                 "TOOL STRATEGY: You have up to 20 tool calls per turn — use them wisely.\n"
                 "- When you don't know how to do something, use delegate_websearch FIRST.\n"
+                "- When you have a specific URL to read, use fetch_page to get the full page content.\n"
                 "- delegate_research for academic topics, delegate_reason for complex planning.\n"
                 "- For package installations (apt, pip, npm), always set timeout=300 in run_command.\n\n"
                 "SELF-AWARENESS: Your own source code lives at ~/shellm/.\n"
