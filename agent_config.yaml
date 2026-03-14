@@ -1,0 +1,115 @@
+# SheLLM Multi-Agent Configuration
+# Each agent has its own API key, model, and role.
+
+agents:
+  - name: shellm-chat
+    provider: deepseek
+    model: deepseek-chat
+    api_key_env: SHELLM_CHAT_API_KEY
+    base_url: "https://api.deepseek.com"
+    stream: true
+    temperature: 0.1
+    supports_tools: true
+    has_reasoning: true
+    tool_set: full
+    delegations:
+      - shellm-websearch
+      - shellm-image
+      - shellm-researcher
+      - shellm-reasoner
+      - shellm-mcp-alpha
+      - shellm-mcp-beta
+      - shellm-mcp-gamma
+    system_role: primary
+
+  - name: shellm-updater
+    provider: deepseek
+    model: deepseek-chat
+    api_key_env: SHELLM_UPDATER_API_KEY
+    base_url: "https://api.deepseek.com"
+    stream: true
+    temperature: 0.3
+    supports_tools: true
+    has_reasoning: false
+    tool_set: minimal
+    system_role: updater
+
+  - name: shellm-mcp-alpha
+    provider: deepseek
+    model: deepseek-chat
+    api_key_env: SHELLM_MCP_ALPHA_API_KEY
+    base_url: "https://api.deepseek.com"
+    stream: true
+    temperature: 0.1
+    supports_tools: true
+    has_reasoning: false
+    tool_set: mcp_only
+    mcp_servers: []   # Populated in mcp_servers.json
+    system_role: mcp_worker
+
+  - name: shellm-mcp-beta
+    provider: deepseek
+    model: deepseek-chat
+    api_key_env: SHELLM_MCP_BETA_API_KEY
+    base_url: "https://api.deepseek.com"
+    stream: true
+    temperature: 0.1
+    supports_tools: true
+    has_reasoning: false
+    tool_set: mcp_only
+    mcp_servers: []
+    system_role: mcp_worker
+
+  - name: shellm-mcp-gamma
+    provider: deepseek
+    model: deepseek-chat
+    api_key_env: SHELLM_MCP_GAMMA_API_KEY
+    base_url: "https://api.deepseek.com"
+    stream: true
+    temperature: 0.1
+    supports_tools: true
+    has_reasoning: false
+    tool_set: mcp_only
+    mcp_servers: []
+    system_role: mcp_worker
+
+  - name: shellm-reasoner
+    provider: deepseek
+    model: deepseek-reasoner
+    api_key_env: SHELLM_REASONER_API_KEY
+    base_url: "https://api.deepseek.com"
+    stream: true
+    supports_tools: false
+    has_reasoning: true
+    tool_set: none
+    system_role: reasoner
+
+  - name: shellm-image
+    provider: openai
+    model: gpt-5-mini
+    api_key_env: SHELLM_IMAGE_API_KEY
+    stream: false
+    supports_tools: false
+    has_reasoning: false
+    tool_set: none
+    system_role: vision
+
+  - name: shellm-websearch
+    provider: openai
+    model: gpt-5-mini
+    api_key_env: SHELLM_WEBSEARCH_API_KEY
+    stream: false
+    supports_tools: false
+    has_reasoning: false
+    tool_set: none
+    system_role: websearch
+
+  - name: shellm-researcher
+    provider: openai
+    model: gpt-5-mini
+    api_key_env: SHELLM_RESEARCHER_API_KEY
+    stream: false
+    supports_tools: false
+    has_reasoning: false
+    tool_set: none
+    system_role: researcher

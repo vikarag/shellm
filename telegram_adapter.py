@@ -1,5 +1,5 @@
 #!/home/gslee/shellm/venv/bin/python3
-"""Telegram bot adapter for LLM chat clients with streaming, vision, and file handling."""
+"""Telegram bot adapter for SheLLM multi-agent system with streaming, vision, and file handling."""
 
 import asyncio
 import base64
@@ -14,6 +14,16 @@ from telegram_format import md_to_tg_html, split_message
 WORKSPACE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workspace")
 CHAT_LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chat_logs.json")
 SESSIONS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "telegram_sessions.json")
+CHAT_ID_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".telegram_chat_id")
+
+
+def _persist_chat_id(chat_id):
+    """Save the most recent Telegram chat_id to disk for API server fallback."""
+    try:
+        with open(CHAT_ID_FILE, "w") as f:
+            f.write(str(chat_id))
+    except OSError:
+        pass
 
 
 def _extract_text(filepath):
@@ -57,62 +67,53 @@ def _extract_text(filepath):
         return None
 
 
-def _fetch_usage():
+def _fetch_usage(registry):
     """Fetch API balance from providers and local usage stats."""
     from datetime import datetime
 
     lines = ["<b>API Balances</b>\n"]
 
-    # DeepSeek balance
-    ds_key = os.environ.get("DEEPSEEK_API_KEY", "")
-    if ds_key:
+    # Collect unique DeepSeek API keys from all DeepSeek agents
+    seen_keys = set()
+    all_configs = registry.get_all_configs()
+    for agent_name, config in all_configs.items():
+        if config.provider != "deepseek":
+            continue
+        key = os.environ.get(config.api_key_env, "")
+        if not key or key in seen_keys:
+            continue
+        seen_keys.add(key)
         try:
             req = urllib.request.Request(
                 "https://api.deepseek.com/user/balance",
-                headers={"Authorization": f"Bearer {ds_key}"},
+                headers={"Authorization": f"Bearer {key}"},
             )
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read())
             if data.get("is_available"):
                 for info in data.get("balance_infos", []):
-                    currency = info.get("currency", "USD")
                     total = info.get("total_balance", "?")
                     granted = info.get("granted_balance", "0")
-                    lines.append(f"• <b>DeepSeek</b> (Chat): ${total} remaining")
+                    lines.append(f"• <b>DeepSeek</b> ({agent_name}): ${total} remaining")
                     if float(granted) > 0:
                         lines.append(f"  (granted: ${granted})")
             else:
-                lines.append("• <b>DeepSeek</b>: Account unavailable")
+                lines.append(f"• <b>DeepSeek</b> ({agent_name}): Account unavailable")
         except Exception as e:
-            lines.append(f"• <b>DeepSeek</b>: Error — {e}")
+            lines.append(f"• <b>DeepSeek</b> ({agent_name}): Error — {e}")
 
-    # Moonshot/Kimi balance
-    ms_key = os.environ.get("MOONSHOT_API_KEY", "")
-    if ms_key:
-        try:
-            req = urllib.request.Request(
-                "https://api.moonshot.ai/v1/users/me/balance",
-                headers={"Authorization": f"Bearer {ms_key}"},
-            )
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read())
-            bal = data.get("data", {})
-            available = bal.get("available_balance", "?")
-            cash = bal.get("cash_balance", 0)
-            voucher = bal.get("voucher_balance", 0)
-            lines.append(f"• <b>Kimi K2.5</b> (Code): ¥{available}")
-            if cash or voucher:
-                lines.append(f"  (cash: ¥{cash}, voucher: ¥{voucher})")
-        except Exception as e:
-            lines.append(f"• <b>Kimi K2.5</b>: Error — {e}")
-
-    # OpenAI — no balance API for standard keys
-    openai_key = os.environ.get("OPENAI_API_KEY", "")
-    if openai_key:
-        lines.append(
-            '• <b>GPT-5 Mini</b> (Research): '
-            '<a href="https://platform.openai.com/usage">Check dashboard</a>'
-        )
+    # OpenAI agents — no balance API for standard keys
+    openai_shown = False
+    for agent_name, config in all_configs.items():
+        if config.provider == "openai" and not openai_shown:
+            openai_key = os.environ.get(config.api_key_env, "")
+            if openai_key:
+                lines.append(
+                    '• <b>OpenAI</b> (image/websearch/researcher): '
+                    '<a href="https://platform.openai.com/usage">Check dashboard</a>'
+                )
+                openai_shown = True
+                break
 
     # Local usage stats from chat logs
     lines.append("\n<b>Usage Stats</b>\n")
@@ -149,35 +150,40 @@ def _fetch_usage():
 
 
 class TelegramAdapter:
-    """Connects a BaseChatClient to a Telegram bot interface.
+    """Connects an AgentRegistry to a Telegram bot interface.
 
     Features:
         - Real-time streaming via sendMessageDraft (Bot API 9.5)
-        - HTML-formatted responses (Markdown → Telegram HTML)
+        - HTML-formatted responses (Markdown -> Telegram HTML)
         - Document handling (PDF, DOCX, CSV, TXT, code files)
-        - Image analysis via GPT-5 Mini vision
+        - Image analysis via shellm-image agent (vision)
+        - Multi-agent routing: chat, updater, image, reasoner
         - Workspace file management
 
     Usage:
-        ./deepseek_chat.py --telegram
+        ./shellm.py --telegram
     """
 
     MAX_SESSION_MESSAGES = 50
 
-    def __init__(self, chat_client, bot_token=None):
-        self.client = chat_client
-        self.client._silent = True
-        self.client._mode = "telegram"
+    def __init__(self, registry, bot_token=None):
+        self.registry = registry
+        self.primary = registry.get_agent("shellm-chat")
+        self.updater = registry.get_agent("shellm-updater")
+        self.primary._silent = True
+        self.primary._mode = "telegram"
+        self.updater._silent = True
+        self.updater._mode = "telegram"
         self.bot_token = bot_token or os.environ.get("TELEGRAM_BOT_TOKEN")
         self.sessions = {}  # chat_id -> messages list
         self._pending_plans = {}  # chat_id -> original prompt awaiting confirmation
+        self._busy_chats: set = set()  # chat_ids where shellm-chat is processing
         self._load_sessions()
 
-        # Vision engine (GPT-5 Mini) for image analysis
-        from gpt5mini_chat import GPT5MiniChat
-        self._vision_engine = GPT5MiniChat()
-        self._vision_engine._silent = True
-        self._vision_engine._mode = "telegram"
+    # Keep self.client as alias for backward compat with command handlers that use adapter.client
+    @property
+    def client(self):
+        return self.primary
 
     def _load_sessions(self):
         """Load sessions from disk on startup."""
@@ -226,12 +232,16 @@ class TelegramAdapter:
         """Handle a message: run LLM in background thread, return final answer."""
         messages = self.get_or_create_session(chat_id)
 
-        self.client._current_chat_id = chat_id
+        self.primary._current_chat_id = chat_id
+        self._busy_chats.add(chat_id)
 
         loop = asyncio.get_event_loop()
-        final_answer = await loop.run_in_executor(
-            None, self.client.process_prompt, text, messages
-        )
+        try:
+            final_answer = await loop.run_in_executor(
+                None, self.primary.process_prompt, text, messages
+            )
+        finally:
+            self._busy_chats.discard(chat_id)
 
         # Persist session after processing
         self.sessions[chat_id] = self._trim_session(messages)
@@ -239,27 +249,26 @@ class TelegramAdapter:
 
         return final_answer or "(No response)"
 
-    def _analyze_image(self, b64_data, prompt):
-        """Send image to GPT-5 Mini for vision analysis."""
-        response = self._vision_engine.client.chat.completions.create(
-            model=self._vision_engine.MODEL,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_data}"}},
-                ],
-            }],
-            max_completion_tokens=2000,
+    async def handle_updater_message(self, chat_id, text, bot):
+        """Handle a message via the updater agent when primary is busy."""
+        messages = []
+        loop = asyncio.get_event_loop()
+        final_answer = await loop.run_in_executor(
+            None, self.updater.process_prompt, text, messages
         )
-        return response.choices[0].message.content or "(No response)"
+        return final_answer or "(No response)"
+
+    def _analyze_image(self, b64_data, prompt):
+        """Send image to shellm-image agent for vision analysis."""
+        image_agent = self.registry.get_agent("shellm-image")
+        return image_agent.analyze_image(b64_data, prompt)
 
     def run(self):
         """Start the Telegram bot with streaming support."""
         if not self.bot_token:
             raise RuntimeError(
                 "Set TELEGRAM_BOT_TOKEN environment variable.\n"
-                "Then run: ./deepseek_chat.py --telegram"
+                "Then run: ./shellm.py --telegram"
             )
 
         try:
@@ -282,6 +291,9 @@ class TelegramAdapter:
             if not text:
                 return
             bot = context.bot
+
+            # Persist chat_id so the API server can use it as fallback
+            _persist_chat_id(chat_id)
 
             # Check if there's a pending plan awaiting confirmation
             if chat_id in adapter._pending_plans:
@@ -306,15 +318,13 @@ class TelegramAdapter:
                         f"EXECUTION GUIDELINES:\n"
                         f"1. After completing each major step, call the report_progress tool "
                         f"with the step number, total steps, title, and what was accomplished.\n"
-                        f"2. Actively use web_research (GPT-5 Mini) for any research, data gathering, "
+                        f"2. Actively use web_research for any research, data gathering, "
                         f"fact-checking, or finding resources/documentation needed during execution.\n"
-                        f"3. Delegate coding, technical implementation, and file generation tasks "
-                        f"to kimi_code (Kimi K2.5) for higher quality results.\n"
-                        f"4. Combine both: research with web_research first, then implement with kimi_code.\n\n"
+                        f"3. Combine research and implementation as needed.\n\n"
                         f"Now execute: {original_prompt}"
                     )
 
-                    adapter.client._plan_text = plan_text
+                    adapter.primary._plan_text = plan_text
                     await update.message.chat.send_action(ChatAction.TYPING)
                     try:
                         response = await adapter.handle_message_streaming(
@@ -324,7 +334,7 @@ class TelegramAdapter:
                     except Exception as e:
                         await update.message.reply_text(f"Error: {e}")
                     finally:
-                        adapter.client._plan_text = None
+                        adapter.primary._plan_text = None
                     return
                 else:
                     # Treat as feedback — regenerate plan with the feedback
@@ -341,9 +351,9 @@ class TelegramAdapter:
                     try:
                         loop = asyncio.get_event_loop()
                         plan_messages = []
-                        adapter.client._ensure_system_message(plan_messages)
+                        adapter.primary._ensure_system_message(plan_messages)
                         response = await loop.run_in_executor(
-                            None, lambda: adapter.client.process_prompt(feedback_prompt, plan_messages)
+                            None, lambda: adapter.primary.process_prompt(feedback_prompt, plan_messages)
                         )
                         # Update stored plan text with the revised plan
                         adapter._pending_plans[chat_id]["plan"] = response or ""
@@ -354,13 +364,17 @@ class TelegramAdapter:
 
             await update.message.chat.send_action(ChatAction.TYPING)
             try:
-                response = await adapter.handle_message_streaming(chat_id, text, bot)
+                # Route to updater if primary is busy, otherwise use primary
+                if chat_id in adapter._busy_chats:
+                    response = await adapter.handle_updater_message(chat_id, text, bot)
+                else:
+                    response = await adapter.handle_message_streaming(chat_id, text, bot)
                 await adapter._send_response(update.message, response)
             except Exception as e:
                 await update.message.reply_text(f"Error: {e}")
 
         async def _on_photo(update: Update, context):
-            """Handle photos — route to GPT-5 Mini for vision analysis."""
+            """Handle photos — route to shellm-image agent for vision analysis."""
             photo = update.message.photo[-1]  # highest resolution
             caption = update.message.caption or "Describe and analyze this image in detail."
             chat_id = update.effective_chat.id
@@ -452,7 +466,7 @@ class TelegramAdapter:
         # ── Command handlers ───────────────────────────────────────
 
         async def _on_start(update: Update, context):
-            model = html_mod.escape(adapter.client.MODEL)
+            model = html_mod.escape(adapter.primary.MODEL)
             await update.message.reply_text(
                 f"<b>SheLLM</b>  <code>{model}</code>\n\n"
                 "I'm an AI assistant with web search, shell access, "
@@ -478,7 +492,7 @@ class TelegramAdapter:
                 "• /forget — Clear conversation history\n"
                 "• /help — Show this message\n\n"
                 "<b>Media support</b>\n"
-                "• Send an <b>image</b> — analyzed by GPT-5 Mini (vision)\n"
+                "• Send an <b>image</b> — analyzed by shellm-image agent (vision)\n"
                 "• Send a <b>document</b> (PDF, DOCX, CSV, code, etc.) — extracted and analyzed",
                 parse_mode="HTML",
             )
@@ -492,7 +506,7 @@ class TelegramAdapter:
             os.execv(sys.executable, [sys.executable] + sys.argv)
 
         async def _on_model(update: Update, context):
-            await update.message.reply_text(adapter.client.format_banner())
+            await update.message.reply_text(adapter.primary.format_banner())
 
         async def _on_search(update: Update, context):
             query = " ".join(context.args) if context.args else ""
@@ -542,7 +556,7 @@ class TelegramAdapter:
             await update.message.reply_text(result)
 
         async def _on_logs(update: Update, context):
-            result = adapter.client._read_chat_logs(last_n=5)
+            result = adapter.primary._read_chat_logs(last_n=5)
             if len(result) > 4000:
                 result = result[:4000] + "\n\n[... truncated ...]"
             await update.message.reply_text(result)
@@ -586,7 +600,7 @@ class TelegramAdapter:
             """Show API balances and local usage stats."""
             from telegram import LinkPreviewOptions
             await update.message.chat.send_action(ChatAction.TYPING)
-            result = await asyncio.to_thread(_fetch_usage)
+            result = await asyncio.to_thread(_fetch_usage, adapter.registry)
             await update.message.reply_text(
                 result, parse_mode="HTML",
                 link_preview_options=LinkPreviewOptions(is_disabled=True),
@@ -612,14 +626,19 @@ class TelegramAdapter:
             chat_id = update.effective_chat.id
             await update.message.chat.send_action(ChatAction.TYPING)
 
+            # Route /plan to the reasoner agent for deep planning
+            try:
+                reasoner = adapter.registry.get_agent("shellm-reasoner")
+            except Exception:
+                reasoner = adapter.primary
+
             plan_prompt = (
                 f"The user wants you to plan (but NOT execute) the following task:\n\n"
                 f"{prompt}\n\n"
                 "Create a detailed execution plan that includes:\n"
                 "1. **Steps** — numbered list of what you'll do\n"
-                "2. **Tools** — which tools/delegations you'll use (kimi_code, web_research, run_command, etc.)\n"
-                "3. **Delegation** — which subtasks go to Kimi K2.5 vs handled directly\n"
-                "4. **Estimated complexity** — simple / moderate / complex\n\n"
+                "2. **Tools** — which tools/delegations you'll use\n"
+                "3. **Estimated complexity** — simple / moderate / complex\n\n"
                 "Do NOT execute anything. Only present the plan.\n"
                 "End with: 'Reply **yes** to execute, **no** to cancel, or provide feedback to adjust the plan.'"
             )
@@ -627,9 +646,9 @@ class TelegramAdapter:
             try:
                 loop = asyncio.get_event_loop()
                 plan_messages = []
-                adapter.client._ensure_system_message(plan_messages)
+                reasoner._ensure_system_message(plan_messages)
                 response = await loop.run_in_executor(
-                    None, lambda: adapter.client.process_prompt(plan_prompt, plan_messages)
+                    None, lambda: reasoner.process_prompt(plan_prompt, plan_messages)
                 )
                 adapter._pending_plans[chat_id] = {"prompt": prompt, "plan": response or ""}
                 await adapter._send_response(update.message, response or "(No plan generated)")
@@ -676,5 +695,5 @@ class TelegramAdapter:
         from task_scheduler import TaskScheduler
         TaskScheduler.get_instance().start(bot_token=self.bot_token)
 
-        print(f"Telegram bot started with streaming (model: {self.client.MODEL})", flush=True)
+        print(f"Telegram bot started with streaming (model: {self.primary.MODEL})", flush=True)
         app.run_polling(drop_pending_updates=True)

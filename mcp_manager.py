@@ -36,12 +36,17 @@ def _mcp_tool_to_openai(server_name, mcp_tool):
 
 
 class MCPManager:
-    """Singleton manager for MCP server connections."""
+    """Manager for MCP server connections.
+
+    Can be used as a singleton (via get_instance()) for the default all-servers
+    case, or instantiated directly with a server_filter for per-agent use.
+    """
 
     _instance = None
     _lock = threading.Lock()
 
-    def __init__(self):
+    def __init__(self, server_filter=None):
+        self._server_filter = server_filter  # Only load these servers (None = all)
         self._servers = {}       # name -> config dict
         self._sessions = {}      # name -> ClientSession
         self._tools = {}         # name -> list of OpenAI-format tool dicts
@@ -94,7 +99,11 @@ class MCPManager:
             logger.warning("mcp_servers.json: 'mcpServers' must be an object")
             return
 
-        self._servers = servers
+        # Filter servers if server_filter is set
+        if self._server_filter is not None:
+            self._servers = {k: v for k, v in servers.items() if k in self._server_filter}
+        else:
+            self._servers = servers
 
     # ── Server lifecycle ─────────────────────────────────────────────
 

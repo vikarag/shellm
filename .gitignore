@@ -35,6 +35,9 @@ mcp_servers.json
 .env
 .env.*
 
+# Telegram chat ID fallback (personal data)
+.telegram_chat_id
+
 # OS files
 .DS_Store
 Thumbs.db

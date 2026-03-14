@@ -1,5 +1,5 @@
 #!/home/gslee/shellm/venv/bin/python3
-"""Daemon mode for LLM chat clients -- stdin pipe, file, and Unix socket modes."""
+"""Daemon mode for SheLLM agents -- stdin pipe, file, and Unix socket modes."""
 
 import json
 import os
@@ -9,7 +9,13 @@ import threading
 
 
 def run_daemon(client, mode, args):
-    """Dispatch to the appropriate daemon mode."""
+    """Dispatch to the appropriate daemon mode.
+
+    Args:
+        client: A BaseAgent instance with process_prompt, MODEL, _silent, _mode
+        mode: One of 'stdin', 'file', 'socket'
+        args: Parsed argparse namespace
+    """
     from task_scheduler import TaskScheduler
     TaskScheduler.get_instance().start()
 
