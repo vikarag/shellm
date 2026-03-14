@@ -38,6 +38,9 @@ _registry = None
 _sessions = {}
 _sessions_lock = threading.Lock()
 
+# Serialize agent access — prevents concurrent requests from clobbering _on_token
+_agent_lock = threading.Lock()
+
 MAX_SESSION_MESSAGES = 50
 
 
@@ -179,9 +182,9 @@ async def chat_completions(request: Request):
 
 def _sync_response(agent, user_input, messages, model_name):
     """Run agent synchronously, return full response."""
-    # Build internal message list from the conversation
-    internal_messages = _build_internal_messages(messages)
-    answer = agent.process_prompt(user_input, internal_messages)
+    with _agent_lock:
+        internal_messages = _build_internal_messages(messages)
+        answer = agent.process_prompt(user_input, internal_messages)
     return _make_response(answer or "(No response)", model_name)
 
 
@@ -196,15 +199,16 @@ def _stream_response(agent, user_input, messages, model_name):
         token_queue.put(("token", accumulated_text))
 
     def _run():
-        internal_messages = _build_internal_messages(messages)
-        agent._on_token = _on_token
-        try:
-            answer = agent.process_prompt(user_input, internal_messages)
-            token_queue.put(("done", answer or "(No response)"))
-        except Exception as e:
-            token_queue.put(("error", str(e)))
-        finally:
-            agent._on_token = None
+        with _agent_lock:
+            internal_messages = _build_internal_messages(messages)
+            agent._on_token = _on_token
+            try:
+                answer = agent.process_prompt(user_input, internal_messages)
+                token_queue.put(("done", answer or "(No response)"))
+            except Exception as e:
+                token_queue.put(("error", str(e)))
+            finally:
+                agent._on_token = None
 
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
