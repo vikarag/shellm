@@ -229,25 +229,97 @@ class TelegramAdapter:
                 await message.reply_text(chunk)
 
     async def handle_message_streaming(self, chat_id, text, bot):
-        """Handle a message: run LLM in background thread, return final answer."""
+        """Handle a message: stream progressive chunks to Telegram as separate messages.
+
+        As tokens arrive from the DeepSeek API, sends small messages at
+        natural breakpoints (paragraph breaks, pauses). Each message is
+        left as-is — no editing or deleting — so the user can follow the
+        agent's thinking process in real time.
+
+        The final formatted response is still returned for logging, but
+        is NOT sent again (the progressive messages already delivered it).
+        """
         messages = self.get_or_create_session(chat_id)
 
         self.primary._current_chat_id = chat_id
         self._busy_chats.add(chat_id)
 
+        # Streaming state shared with the _on_token callback
+        stream_state = {
+            "sent_len": 0,         # how much of accumulated text we've already sent
+            "last_send_time": time.time(),
+            "send_interval": 3.0,  # max seconds to hold before sending
+            "pending": "",         # unsent text buffer
+        }
+
+        def _flush_chunk(chunk_text):
+            """Send a chunk as a new Telegram message."""
+            chunk_text = chunk_text.strip()
+            if not chunk_text:
+                return
+            # Respect Telegram's 4096 char limit
+            for part in split_message(md_to_tg_html(chunk_text)):
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        bot.send_message(chat_id=chat_id, text=part, parse_mode="HTML"),
+                        loop
+                    ).result(timeout=10)
+                except Exception:
+                    # Fallback to plain text
+                    try:
+                        asyncio.run_coroutine_threadsafe(
+                            bot.send_message(chat_id=chat_id, text=chunk_text[:4096]),
+                            loop
+                        ).result(timeout=10)
+                    except Exception:
+                        pass
+            stream_state["last_send_time"] = time.time()
+
+        def _on_token(accumulated_text):
+            """Called by BaseAgent.handle_stream as tokens arrive."""
+            new_text = accumulated_text[stream_state["sent_len"]:]
+            now = time.time()
+            elapsed = now - stream_state["last_send_time"]
+
+            # Check for natural breakpoints in new text
+            # Split on double newlines (paragraph breaks)
+            if "\n\n" in new_text:
+                parts = new_text.split("\n\n")
+                # Send all complete paragraphs, keep the last (possibly incomplete) part
+                for part in parts[:-1]:
+                    _flush_chunk(part)
+                stream_state["sent_len"] = len(accumulated_text) - len(parts[-1])
+            elif elapsed >= stream_state["send_interval"] and len(new_text) >= 40:
+                # Time-based flush: send what we have after the interval
+                _flush_chunk(new_text)
+                stream_state["sent_len"] = len(accumulated_text)
+
         loop = asyncio.get_event_loop()
+        self.primary._on_token = _on_token
         try:
             final_answer = await loop.run_in_executor(
                 None, self.primary.process_prompt, text, messages
             )
         finally:
+            self.primary._on_token = None
             self._busy_chats.discard(chat_id)
+
+        # Flush any remaining unsent text
+        if final_answer:
+            remaining = final_answer[stream_state["sent_len"]:]
+            if remaining and remaining.strip():
+                try:
+                    for part in split_message(md_to_tg_html(remaining)):
+                        await bot.send_message(chat_id=chat_id, text=part, parse_mode="HTML")
+                except Exception:
+                    await bot.send_message(chat_id=chat_id, text=remaining[:4096])
 
         # Persist session after processing
         self.sessions[chat_id] = self._trim_session(messages)
         self._save_sessions()
 
-        return final_answer or "(No response)"
+        # Return None to signal caller NOT to send the response again
+        return None
 
     async def handle_updater_message(self, chat_id, text, bot):
         """Handle a message via the updater agent when primary is busy."""
@@ -369,7 +441,9 @@ class TelegramAdapter:
                     response = await adapter.handle_updater_message(chat_id, text, bot)
                 else:
                     response = await adapter.handle_message_streaming(chat_id, text, bot)
-                await adapter._send_response(update.message, response)
+                # response is None when streaming already sent progressive messages
+                if response:
+                    await adapter._send_response(update.message, response)
             except Exception as e:
                 await update.message.reply_text(f"Error: {e}")
 

@@ -169,7 +169,7 @@ MCP tools are namespaced as `{server}__{tool}` (e.g., `filesystem__read_file`) t
 
 ## Telegram Bot
 
-SheLLM runs natively as a Telegram bot with real-time streaming, HTML-formatted responses, and persistent sessions (conversations survive bot restarts). Incoming images are automatically routed to `shellm-image`; `/plan` commands are routed to `shellm-reasoner`; messages arriving while the chat agent is busy are handled by `shellm-updater`.
+SheLLM runs natively as a Telegram bot with **progressive streaming** — responses arrive as separate small messages at natural breakpoints (paragraph breaks, pauses) so you can follow the agent's thinking in real time instead of waiting for one large block. Responses are HTML-formatted, and sessions persist across bot restarts. Incoming images are automatically routed to `shellm-image`; `/plan` commands are routed to `shellm-reasoner`; messages arriving while the chat agent is busy are handled by `shellm-updater`.
 
 ```bash
 # Set your bot token in .env, then:
@@ -186,7 +186,7 @@ The `/plan` command lets you preview an execution plan before running a task:
 2. Reply **yes** to execute, **no** to cancel, or send feedback to revise the plan
 3. Feedback is iterative -- keep refining until the plan looks right, then approve
 
-During execution, the chat agent calls `report_progress` after each major step. The progress queue delivers updates to `shellm-updater`, which summarizes and sends a Telegram notification -- real-time visibility into multi-step plans without blocking execution.
+During execution, the chat agent calls `report_progress` after each major step. The progress queue delivers updates to `shellm-updater`, which summarizes and sends a Telegram notification -- real-time visibility into multi-step plans without blocking execution. Telegram notifications from `report_progress` are only sent during plan execution mode to prevent unexpected messages during regular tool calls.
 
 ```
 You:  /plan install htop and verify it works
@@ -213,7 +213,7 @@ python api_server.py
 uvicorn api_server:app --host 0.0.0.0 --port 8000
 ```
 
-The server (`api_server.py`) is a FastAPI/uvicorn application that implements the `/v1/chat/completions` endpoint. Each configured agent appears as a selectable model in the UI. The production instance is accessible at `shellm.gsl.ee`.
+The server (`api_server.py`) is a FastAPI/uvicorn application that implements the `/v1/chat/completions` endpoint with SSE streaming. Each configured agent appears as a selectable model in the UI. The production instance is accessible at `shellm.gsl.ee`. The API server binds to `127.0.0.1` by default for security -- use `--host` to change.
 
 ## Run Modes
 
@@ -305,8 +305,9 @@ Modules:
   memory_manager.py        -- Persistent shared memory (SQLite + FTS5 + auto-archival)
   mcp_manager.py           -- MCP server connections + tool routing (async bridge)
 
-SheLLM.db    -- single SQLite database for memory + RAG (WAL mode)
-workspace/   -- SheLLM's project directory for file output
+SheLLM.db                  -- single SQLite database for memory + RAG (WAL mode)
+telegram_outbox.jsonl      -- audit log of all outgoing Telegram messages (send_file, report_progress, schedule_task)
+workspace/                 -- SheLLM's project directory for file output
 ```
 
 Agent routing overview:

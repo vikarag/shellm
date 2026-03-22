@@ -14,6 +14,24 @@ from task_scheduler import schedule_task, list_scheduled_tasks, cancel_scheduled
 from agents.progress import progress_queue
 
 
+def _log_telegram_send(tool_name: str, chat_id, text: str, success: bool):
+    """Log every outgoing Telegram message for auditability."""
+    import datetime
+    log_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "telegram_outbox.jsonl")
+    entry = {
+        "timestamp": datetime.datetime.now().isoformat(),
+        "tool": tool_name,
+        "chat_id": chat_id,
+        "text": text[:500],
+        "success": success,
+    }
+    try:
+        with open(log_file, "a") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 class ToolContext:
     """Carries shared state needed by tool handlers."""
 
@@ -313,10 +331,13 @@ def _exec_send_file(args, ctx):
             result = json.loads(resp.read())
 
         if result.get("ok"):
+            _log_telegram_send("send_file", chat_id, f"[File: {filename}] {caption or ''}", True)
             return f"File sent successfully: {filename}"
         else:
+            _log_telegram_send("send_file", chat_id, f"[File: {filename}] FAILED", False)
             return f"Telegram API error: {result.get('description', 'unknown error')}"
     except Exception as e:
+        _log_telegram_send("send_file", chat_id, f"[File: {path}] ERROR: {e}", False)
         return f"Error sending file: {e}"
 
 
@@ -371,14 +392,16 @@ def _exec_report_progress(args, ctx):
         details,
     )
 
-    # Background Telegram notification
+    # Background Telegram notification — only during explicit plan execution
     chat_id = ctx.current_chat_id
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    if chat_id and bot_token:
+    if chat_id and bot_token and getattr(ctx, 'plan_text', None):
         plan_text = (ctx.plan_text or "")[:2000]
         total_steps = args.get("total_steps", "?")
 
         def _bg_send():
+            text = ""
+            success = False
             try:
                 # Use updater agent's client for the summary
                 if ctx.registry:
@@ -405,8 +428,10 @@ def _exec_report_progress(args, ctx):
                 data = json.dumps({"chat_id": chat_id, "text": text}).encode()
                 req = _ur.Request(url, data=data, headers={"Content-Type": "application/json"})
                 _ur.urlopen(req, timeout=15)
+                success = True
             except Exception:
                 pass
+            _log_telegram_send("report_progress", chat_id, text, success)
 
         t = threading.Thread(target=_bg_send, daemon=True)
         t.start()

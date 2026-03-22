@@ -111,7 +111,27 @@ class TaskScheduler:
         req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=15) as resp:
             result = json.loads(resp.read())
-        return "sent" if result.get("ok") else f"Telegram error: {result}"
+        success = result.get("ok", False)
+        self._log_send("schedule_task", chat_id, text, success)
+        return "sent" if success else f"Telegram error: {result}"
+
+    @staticmethod
+    def _log_send(tool_name, chat_id, text, success):
+        """Log outgoing Telegram message for auditability."""
+        import os
+        log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "telegram_outbox.jsonl")
+        entry = {
+            "timestamp": datetime.now(KST).isoformat(),
+            "tool": tool_name,
+            "chat_id": chat_id,
+            "text": text[:500],
+            "success": success,
+        }
+        try:
+            with open(log_file, "a") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
 
     def _run_shell(self, payload):
         """Execute a shell command with safety check."""
