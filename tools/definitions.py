@@ -411,4 +411,20 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "delegate_claude",
+            "description": "Delegate a task to Claude Code (Anthropic's AI coding agent). Claude Code can explore codebases, read/edit files, run commands, and perform complex software engineering tasks. Use this when the user asks for code analysis, refactoring, debugging, or any task that benefits from Claude's coding capabilities. Specify a working directory to give Claude Code access to a specific project.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "The task or question for Claude Code"},
+                    "directory": {"type": "string", "description": "Working directory for Claude Code (e.g. '~/nanoclaw'). Defaults to home directory."},
+                    "model": {"type": "string", "description": "Model to use: 'sonnet' (default, fast) or 'opus' (deep analysis)"},
+                },
+                "required": ["prompt"],
+            },
+        },
+    },
 ]

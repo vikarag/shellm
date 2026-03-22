@@ -2,6 +2,7 @@
 
 import json
 import os
+import subprocess
 import threading
 
 from cron_manager import cron_list, cron_create, cron_delete
@@ -413,6 +414,64 @@ def _exec_report_progress(args, ctx):
     return f"Progress reported: Step {step_number} - {step_title}"
 
 
+def _exec_delegate_claude(args, ctx):
+    """Delegate a task to Claude Code CLI."""
+    prompt = args.get("prompt", "")
+    directory = args.get("directory", "~")
+    model = args.get("model", "sonnet")
+
+    directory = os.path.expanduser(directory)
+
+    ctx._print(f"[Claude Code: {prompt[:80]}...]")
+
+    cmd = [
+        os.path.expanduser("~/.local/bin/claude"),
+        "-p", prompt,
+        "--output-format", "json",
+        "--model", model,
+        "--dangerously-skip-permissions",
+    ]
+
+    if directory and directory != os.path.expanduser("~"):
+        cmd.extend(["--add-dir", directory])
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            cwd=directory,
+        )
+
+        if result.returncode != 0:
+            error = result.stderr.strip() or result.stdout.strip()
+            ctx._print(f"[Claude Code error: exit {result.returncode}]")
+            return f"Claude Code error (exit {result.returncode}): {error}"
+
+        # Parse JSON output
+        try:
+            data = json.loads(result.stdout)
+            answer = data.get("result", result.stdout)
+        except json.JSONDecodeError:
+            answer = result.stdout
+
+        ctx._print("[Claude Code complete]")
+        progress_queue.push("tool_call", "delegate_claude", f"Prompt: {prompt[:80]}")
+
+        if len(answer) > 30000:
+            answer = answer[:30000] + "\n\n[... truncated ...]"
+
+        return answer
+    except subprocess.TimeoutExpired:
+        ctx._print("[Claude Code timed out]")
+        return "Claude Code timed out after 5 minutes."
+    except FileNotFoundError:
+        return "Claude Code CLI not found. Install it first."
+    except Exception as e:
+        return f"Claude Code error: {e}"
+
+
 # Dispatch table
 TOOL_DISPATCH = {
     "delegate_websearch": _exec_delegate_websearch,
@@ -444,6 +503,7 @@ TOOL_DISPATCH = {
     "list_scheduled_tasks": _exec_list_scheduled_tasks,
     "cancel_scheduled_task": _exec_cancel_scheduled_task,
     "report_progress": _exec_report_progress,
+    "delegate_claude": _exec_delegate_claude,
 }
 
 

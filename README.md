@@ -2,7 +2,7 @@
   <img src="shellm-logo.svg" alt="SheLLM" width="360">
 </p>
 
-A lightweight [OpenClaw](https://github.com/openclaw) alternative. Nine specialized agents, 29 built-in tools, MCP extensibility, config-driven.
+A lightweight [OpenClaw](https://github.com/openclaw) alternative. Nine specialized agents, 30 built-in tools, MCP extensibility, config-driven.
 
 **SheLLM** (pronounced *shell-el-em*) is a multi-agent CLI framework for tool-using LLMs. A single entry point (`shellm.py`) routes work across nine purpose-built agents -- covering conversation, reasoning, vision, web search, academic research, and MCP server integration -- out of the box, with zero config beyond API keys.
 
@@ -90,7 +90,7 @@ agents:
 
 For custom behavior beyond config (e.g., a new agent class), add a spec under `agents/specs/` and register it in `agents/registry.py`.
 
-## Built-in Tools (29)
+## Built-in Tools (30)
 
 Every agent gets its assigned tool set automatically:
 
@@ -125,10 +125,11 @@ Every agent gets its assigned tool set automatically:
 | `delegate_image` | Delegate image recognition to `shellm-image` |
 | `delegate_research` | Delegate academic research to `shellm-researcher` |
 | `delegate_reason` | Delegate deep reasoning / planning to `shellm-reasoner` |
+| `delegate_claude` | Delegate coding tasks to Claude Code (codebase exploration, refactoring, debugging) |
 
 The model decides when to use them. Up to 20 tool-call rounds per turn.
 
-Named tool sets (`tool_sets.py`) control which tools each agent receives: `full` (all 29), `minimal` (core file/memory/shell), `mcp_only` (MCP tools only), `none`.
+Named tool sets (`tool_sets.py`) control which tools each agent receives: `full` (all 30), `minimal` (core file/memory/shell), `mcp_only` (MCP tools only), `none`.
 
 ### Auto-Delegation
 
@@ -141,6 +142,7 @@ Named tool sets (`tool_sets.py`) control which tools each agent receives: `full`
 | Image or screenshot | `delegate_image` | `shellm-image` |
 | Academic paper, deep research | `delegate_research` | `shellm-researcher` |
 | Multi-step plan, hard reasoning | `delegate_reason` | `shellm-reasoner` |
+| Code analysis, refactoring, debugging | `delegate_claude` | Claude Code CLI (`claude -p`) |
 
 No manual switching needed. The chat agent recognizes the task type and routes it autonomously. When the chat agent is busy executing a multi-step plan, `shellm-updater` observes the progress queue and replies to incoming messages so the user is never left waiting.
 
@@ -284,7 +286,7 @@ agents/
     researcher.py          -- ResearcherAgent (academic focus)
 
 tools/
-  definitions.py           -- 29 tool definitions (JSON schema)
+  definitions.py           -- 30 tool definitions (JSON schema)
   executor.py              -- dispatch table + execute_tool()
   tool_sets.py             -- named subsets: full | minimal | mcp_only | none
 
@@ -320,6 +322,7 @@ shellm.py
     |                              |-- delegate_image     --> shellm-image
     |                              |-- delegate_research  --> shellm-researcher
     |                              |-- delegate_reason    --> shellm-reasoner
+    |                              |-- delegate_claude   --> Claude Code CLI (claude -p)
     |                              +-- report_progress   --> shellm-updater (via ProgressQueue)
     |
     +-- image attached -----> shellm-image

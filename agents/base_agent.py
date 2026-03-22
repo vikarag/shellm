@@ -269,7 +269,8 @@ class BaseAgent:
             system_content = base + (
                 " You can search the web (via delegate_websearch), fetch specific web pages (via fetch_page), "
                 "analyze images (via delegate_image), "
-                "conduct research (via delegate_research), and use deep reasoning (via delegate_reason). "
+                "conduct research (via delegate_research), use deep reasoning (via delegate_reason), "
+                "and delegate complex coding tasks to Claude Code (via delegate_claude). "
                 "You can execute shell commands, manage cron jobs, read files from the "
                 "project directory (read_file), write/search files in workspace/, and review past chat logs "
                 "with chat_log_read. "
@@ -284,6 +285,7 @@ class BaseAgent:
                 "- When you don't know how to do something, use delegate_websearch FIRST.\n"
                 "- When you have a specific URL to read, use fetch_page to get the full page content.\n"
                 "- delegate_research for academic topics, delegate_reason for complex planning.\n"
+                "- delegate_claude for code analysis, refactoring, debugging, or tasks in specific project directories.\n"
                 "- For package installations (apt, pip, npm), always set timeout=300 in run_command.\n\n"
                 "SELF-AWARENESS: Your own source code lives at ~/shellm/.\n"
                 "You have a task scheduler — use schedule_task to send a Telegram message or run a shell "
