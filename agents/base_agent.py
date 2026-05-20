@@ -1,13 +1,19 @@
-"""Base agent class for SheLLM multi-agent system."""
+"""The single SheLLM agent.
 
+One model profile, one tool list, one process. The agent calls all tools
+itself — no delegation, no sub-agents.
+"""
+
+import base64
 import json
+import mimetypes
 import os
 import re
 import time
 from datetime import datetime, timezone, timedelta
 
 from tools.executor import ToolContext, execute_tool
-from tools.tool_sets import get_tool_set
+from tools.definitions import TOOLS
 from agents.progress import progress_queue
 
 CHAT_LOG_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "chat_logs.json")
@@ -15,39 +21,20 @@ KST = timezone(timedelta(hours=9))
 
 
 class BaseAgent:
-    """Base class for all SheLLM agents.
+    """SheLLM's only agent. Configuration comes from AgentConfig."""
 
-    Unlike BaseChatClient, configuration comes from AgentConfig rather than class variables.
-    """
-
-    def __init__(self, config, client, registry=None):
-        """
-        Args:
-            config: AgentConfig dataclass
-            client: OpenAI client instance (pre-configured with API key)
-            registry: AgentRegistry instance for delegation
-        """
+    def __init__(self, config, client):
         self.config = config
         self.client = client
-        self.registry = registry
-        self._silent = False
         self._current_tool_calls = []
-        self._mode = "interactive"
-        self._on_token = None
-        self._current_chat_id = None
-        self._plan_text = None
+        self._pending_images = []   # list of (mime, b64) attached for next turn
 
     @property
     def MODEL(self):
         return self.config.model
 
-    @property
-    def BANNER_NAME(self):
-        return self.config.name
-
     def _print(self, *args, **kwargs):
-        if not self._silent:
-            print(*args, **kwargs)
+        print(*args, **kwargs)
 
     # ── Chat logging ─────────────────────────────────────────────────
 
@@ -56,7 +43,6 @@ class BaseAgent:
             "timestamp": datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST"),
             "model": self.config.model,
             "agent": self.config.name,
-            "mode": self._mode,
             "stream": self.config.stream,
             "temperature": self.config.temperature,
             "user_input": user_input,
@@ -80,7 +66,6 @@ class BaseAgent:
 
     @staticmethod
     def _read_chat_logs_static(last_n=10, keyword=None, model_filter=None):
-        """Static version for use by tool executor."""
         last_n = min(max(last_n, 1), 50)
         try:
             if not os.path.exists(CHAT_LOG_FILE):
@@ -106,7 +91,7 @@ class BaseAgent:
 
         lines = [f"Chat Logs ({len(logs)} entries):\n"]
         for e in logs:
-            lines.append(f"[{e.get('timestamp', '?')}] model={e.get('model', '?')} mode={e.get('mode', '?')} ({e.get('duration_ms', 0):.0f}ms)")
+            lines.append(f"[{e.get('timestamp', '?')}] model={e.get('model', '?')} ({e.get('duration_ms', 0):.0f}ms)")
             lines.append(f"  User: {e.get('user_input', '')[:200]}")
             resp = e.get("assistant_response") or "(no response)"
             lines.append(f"  Assistant: {resp[:300]}")
@@ -118,20 +103,22 @@ class BaseAgent:
             lines.append("")
         return "\n".join(lines)
 
-    def _read_chat_logs(self, last_n=10, keyword=None, model_filter=None):
-        return self._read_chat_logs_static(last_n, keyword, model_filter)
+    # ── Image attach ─────────────────────────────────────────────────
 
-    # ── Tool context ─────────────────────────────────────────────────
-
-    def _make_tool_context(self):
-        return ToolContext(
-            registry=self.registry,
-            current_chat_id=self._current_chat_id,
-            mode=self._mode,
-            model=self.config.model,
-            plan_text=self._plan_text,
-            print_fn=self._print,
-        )
+    def attach_image(self, path):
+        """Queue an image for the next user turn. Returns an error string on
+        failure, or None on success."""
+        if not self.config.vision:
+            return f"Model {self.config.model} is not configured for vision (set vision: true in agent_config.yaml)."
+        if not os.path.isfile(path):
+            return f"Image not found: {path}"
+        mime, _ = mimetypes.guess_type(path)
+        if not mime or not mime.startswith("image/"):
+            return f"Not a recognized image type: {path}"
+        with open(path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("ascii")
+        self._pending_images.append((mime, b64))
+        return None
 
     # ── API params ──────────────────────────────────────────────────
 
@@ -139,14 +126,8 @@ class BaseAgent:
         params = {"model": self.config.model, "messages": messages, "stream": self.config.stream}
         if self.config.temperature is not None:
             params["temperature"] = self.config.temperature
-        if self.config.supports_tools:
-            tools = get_tool_set(self.config.tool_set)
-            # Add MCP tools if applicable
-            if self.config.tool_set in ("full",):
-                from mcp_manager import MCPManager
-                tools = tools + MCPManager.get_instance().get_tools()
-            if tools:
-                params["tools"] = tools
+        if self.config.supports_tools and TOOLS:
+            params["tools"] = TOOLS
         return params
 
     def build_no_tool_params(self, messages):
@@ -157,16 +138,34 @@ class BaseAgent:
 
     # ── Tool execution ──────────────────────────────────────────────
 
+    def _make_tool_context(self):
+        return ToolContext(model=self.config.model, print_fn=self._print)
+
     def execute_tool(self, name, args):
-        tool_record = {"tool": name, "args": args}
-        self._current_tool_calls.append(tool_record)
-        ctx = self._make_tool_context()
-        return execute_tool(name, args, ctx)
+        self._current_tool_calls.append({"tool": name, "args": args})
+        return execute_tool(name, args, self._make_tool_context())
+
+    @staticmethod
+    def _parse_tool_arguments(raw):
+        """Parse a tool-call arguments string.
+
+        Some providers (notably Ollama) re-emit the *full* arguments string in
+        every streaming chunk instead of sending JSON deltas, so the
+        accumulated value ends up as concatenated objects like
+        `{"a":1}{"a":1}`. raw_decode reads the first valid object and stops.
+        """
+        raw = (raw or "").strip() or "{}"
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            decoder = json.JSONDecoder()
+            args, _ = decoder.raw_decode(raw)
+            return args
 
     def handle_tool_calls(self, response_message, messages):
         messages.append(response_message)
         for tool_call in response_message.tool_calls:
-            args = json.loads(tool_call.function.arguments)
+            args = self._parse_tool_arguments(tool_call.function.arguments)
             result_text = self.execute_tool(tool_call.function.name, args)
             messages.append({
                 "role": "tool",
@@ -175,7 +174,24 @@ class BaseAgent:
             })
         return self.client.chat.completions.create(**self.build_params(messages))
 
-    # ── Response handling ───────────────────────────────────────────
+    # ── Stream / batch handlers ─────────────────────────────────────
+
+    @staticmethod
+    def _extract_reasoning(obj):
+        """Pull a reasoning trace from a streaming delta or batch message.
+
+        Different providers use different field names and surface them
+        differently through the OpenAI SDK:
+          - DeepSeek/vLLM:  `reasoning_content` (as attr or in model_extra)
+          - Ollama, some OpenRouter models:  `reasoning` (in model_extra,
+            since the SDK schema doesn't know that field)
+        """
+        for name in ("reasoning_content", "reasoning"):
+            val = getattr(obj, name, None)
+            if val:
+                return val
+        extra = getattr(obj, "model_extra", None) or {}
+        return extra.get("reasoning_content") or extra.get("reasoning")
 
     def handle_stream(self, response):
         reasoning_chunks = []
@@ -201,7 +217,7 @@ class BaseAgent:
                 continue
 
             if self.config.has_reasoning:
-                rc = getattr(delta, "reasoning_content", None)
+                rc = self._extract_reasoning(delta)
                 if rc:
                     if not in_reasoning:
                         self._print("\n[Thinking]")
@@ -219,8 +235,6 @@ class BaseAgent:
                     self._print("\nAssistant: ", end="")
                 self._print(delta.content, end="", flush=True)
                 answer_chunks.append(delta.content)
-                if self._on_token:
-                    self._on_token(self._total_streamed + "".join(answer_chunks))
 
         self._total_streamed += "".join(answer_chunks)
 
@@ -238,7 +252,7 @@ class BaseAgent:
             return None, message
 
         if self.config.has_reasoning:
-            reasoning = getattr(message, "reasoning_content", None)
+            reasoning = self._extract_reasoning(message)
             if reasoning:
                 self._print(f"\n[Thinking]\n{reasoning}")
 
@@ -246,97 +260,43 @@ class BaseAgent:
         self._print(f"\nAssistant: {answer}\n")
         return answer, None
 
-    # ── Banner ──────────────────────────────────────────────────────
+    # ── Banner & system prompt ──────────────────────────────────────
 
     def format_banner(self):
-        return f"{self.config.name} (model: {self.config.model}, stream: {self.config.stream}, temp: {self.config.temperature or 'default'})"
-
-    # ── System message ──────────────────────────────────────────────
+        bits = [
+            f"agent: {self.config.name}",
+            f"model: {self.config.model}",
+            f"provider: {self.config.provider}",
+            f"stream: {self.config.stream}",
+        ]
+        if self.config.vision:
+            bits.append("vision: on")
+        if self.config.has_reasoning:
+            bits.append("reasoning: on")
+        return "SheLLM — " + ", ".join(bits)
 
     def _ensure_system_message(self, messages):
-        """Generate role-appropriate system prompt based on config.system_role."""
         now = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
-
-        base = (
-            f"You are SheLLM, a helpful AI assistant. Current date/time: {now} (Asia/Seoul, UTC+9). "
-            "You have persistent shared memory (use memory_read at the start of a conversation to recall "
-            "who you are and what you know about the user)."
+        system_content = (
+            f"You are SheLLM, a CLI assistant. Current date/time: {now} (Asia/Seoul, UTC+9).\n\n"
+            "You have a persistent shared memory across sessions — call memory_read at the start "
+            "of a conversation to recall what you know about the user, and use memory_write to "
+            "save useful information for future sessions.\n\n"
+            "TOOLS\n"
+            "- web_search: DuckDuckGo search. Use whenever you need current information.\n"
+            "- fetch_page: read a specific URL's text content.\n"
+            "- read_file / write_file / list_directory / search_files: file ops sandboxed to workspace/. "
+            "All paths are relative to workspace/ — use '.' for its root, or names like 'notes.txt'. "
+            "Never use absolute paths like '/' or '/home'.\n"
+            "- run_command: execute shell commands (user confirmation required).\n"
+            "- rag_index / rag_search / rag_list / rag_delete: semantic document store.\n"
+            "- cron_list / cron_create / cron_delete: schedule recurring jobs.\n"
+            "- memory_read / memory_write / memory_search / memory_delete: persistent memory.\n"
+            "- chat_log_read: review past conversations.\n\n"
+            "You have up to 20 tool calls per turn. For installs (apt/pip/npm), pass timeout=300 "
+            "to run_command.\n\n"
+            f"You are running as: {self.config.model} ({self.config.name})."
         )
-
-        role = self.config.system_role
-
-        if role == "primary":
-            system_content = base + (
-                " You can search the web (via delegate_websearch), fetch specific web pages (via fetch_page), "
-                "analyze images (via delegate_image), "
-                "conduct research (via delegate_research), use deep reasoning (via delegate_reason), "
-                "and delegate complex coding tasks to Claude Code (via delegate_claude). "
-                "You can execute shell commands, manage cron jobs, read files from the "
-                "project directory (read_file), write/search files in workspace/, and review past chat logs "
-                "with chat_log_read. "
-                "You also have a RAG system — use rag_index to store documents for semantic search, "
-                "and rag_search to retrieve relevant chunks later. Suggest indexing when the user sends documents. "
-                "You also have MCP (Model Context Protocol) support — external servers can provide "
-                "additional tools. Use mcp_list_servers to see connected servers.\n\n"
-                "You have a send_file tool that sends files to the user via Telegram. "
-                "ALWAYS use send_file after creating or saving a file that the user requested.\n\n"
-                "Proactively save useful information about the user to memory for future sessions.\n\n"
-                "TOOL STRATEGY: You have up to 20 tool calls per turn — use them wisely.\n"
-                "- When you don't know how to do something, use delegate_websearch FIRST.\n"
-                "- When you have a specific URL to read, use fetch_page to get the full page content.\n"
-                "- delegate_research for academic topics, delegate_reason for complex planning.\n"
-                "- delegate_claude for code analysis, refactoring, debugging, or tasks in specific project directories.\n"
-                "- For package installations (apt, pip, npm), always set timeout=300 in run_command.\n\n"
-                "SELF-AWARENESS: Your own source code lives at ~/shellm/.\n"
-                "You have a task scheduler — use schedule_task to send a Telegram message or run a shell "
-                "command at a future time. "
-                f"You are currently running as: {self.config.model} (agent: {self.config.name})."
-            )
-        elif role == "updater":
-            system_content = base + (
-                " You are the updater agent. Your role is to inform the user about the current status "
-                "of ongoing tasks when the main chat agent is busy. You can read memory and chat logs "
-                "to provide context. Be concise and helpful."
-                f"\n\nYou are currently running as: {self.config.model} (agent: {self.config.name})."
-            )
-        elif role == "mcp_worker":
-            system_content = (
-                f"You are an MCP worker agent ({self.config.name}). Current date/time: {now}. "
-                "You handle MCP tool calls for your assigned servers. Execute tools and return results."
-            )
-        elif role == "reasoner":
-            system_content = (
-                f"You are a deep reasoning agent. Current date/time: {now}. "
-                "Analyze problems thoroughly, break them into steps, and provide structured plans "
-                "with clear reasoning traces. Focus on accuracy and completeness."
-            )
-        elif role == "vision":
-            system_content = (
-                f"You are an image analysis agent. Current date/time: {now}. "
-                "Describe and analyze images in detail."
-            )
-        elif role == "websearch":
-            system_content = (
-                f"You are a web search agent. Current date/time: {now}. "
-                "Search the web and provide comprehensive, accurate answers based on current information."
-            )
-        elif role == "researcher":
-            system_content = (
-                f"You are an academic research agent. Current date/time: {now}. "
-                "Conduct thorough research with a focus on accuracy, citing sources when possible. "
-                "Prioritize academic and authoritative sources."
-            )
-        else:
-            system_content = base + f"\nAgent: {self.config.name}, Model: {self.config.model}."
-
-        if self._mode == "telegram":
-            system_content += (
-                "\n\nTELEGRAM MODE: Format responses for mobile readability — "
-                "short paragraphs, **bold** for key terms, `backticks` for code/commands, "
-                "```language blocks for code. Use bullet points (- ) for lists. "
-                "Be concise — avoid long walls of text."
-            )
-
         if not messages or messages[0].get("role") != "system":
             messages.insert(0, {"role": "system", "content": system_content})
         else:
@@ -344,22 +304,28 @@ class BaseAgent:
 
     # ── Core prompt processing ──────────────────────────────────────
 
+    def _build_user_message(self, text):
+        """Build a user message. If images are pending, use the multi-modal
+        content format; otherwise a plain string."""
+        if not self._pending_images:
+            return {"role": "user", "content": text}
+
+        content = [{"type": "text", "text": text}] if text else []
+        for mime, b64 in self._pending_images:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime};base64,{b64}"},
+            })
+        self._pending_images = []
+        return {"role": "user", "content": content}
+
     def process_prompt(self, user_input, messages):
         original_input = user_input
-        if user_input.lower().startswith("/search "):
-            query = user_input[8:].strip()
-            if not query:
-                return None
-            user_input = (
-                "Research the following by searching the web, reading the most relevant "
-                "pages in detail, and providing a comprehensive answer:\n\n" + query
-            )
-
         self._current_tool_calls = []
         self._total_streamed = ""
         t0 = time.time()
         self._ensure_system_message(messages)
-        messages.append({"role": "user", "content": user_input})
+        messages.append(self._build_user_message(user_input))
 
         try:
             response = self.client.chat.completions.create(**self.build_params(messages))
@@ -384,9 +350,7 @@ class BaseAgent:
                                     arguments=tc["function"]["arguments"],
                                 ),
                             ))
-                        msg_kwargs = dict(
-                            role="assistant", content=None, tool_calls=tc_list,
-                        )
+                        msg_kwargs = dict(role="assistant", content=None, tool_calls=tc_list)
                         if reasoning and self.config.has_reasoning:
                             msg_kwargs["reasoning_content"] = reasoning
                         msg = ChatCompletionMessage(**msg_kwargs)
@@ -400,48 +364,26 @@ class BaseAgent:
                 break
 
             if not answer:
-                response = self.client.chat.completions.create(
-                    **self.build_no_tool_params(messages)
-                )
+                response = self.client.chat.completions.create(**self.build_no_tool_params(messages))
                 if self.config.stream:
                     answer, _, _ = self.handle_stream(response)
                 else:
                     answer, _ = self.handle_batch(response)
 
-            # For streaming, use full accumulated text across all rounds
             if self.config.stream and self._total_streamed and self._total_streamed != answer:
                 answer = self._total_streamed
 
-            # Strip DeepSeek internal markup
             if answer:
                 answer = re.sub(r"<｜DSML｜function_calls>.*?</｜DSML｜function_calls>", "", answer, flags=re.DOTALL).strip()
                 answer = re.sub(r"<｜DSML｜[^>]*>", "", answer).strip()
 
-            # Diagnostic if no answer
             if not answer and self._current_tool_calls:
-                tool_errors = []
-                for msg in messages:
-                    if not isinstance(msg, dict):
-                        continue
-                    if msg.get("role") == "tool":
-                        content = msg.get("content", "")
-                        if any(kw in content for kw in (
-                            "Error", "error", "BLOCKED", "not found",
-                            "timed out", "Path escapes", "Traceback",
-                        )):
-                            tool_errors.append(content[:300])
-
                 lines = [f"I used {len(self._current_tool_calls)} tool calls without producing a final answer.\n"]
                 lines.append("Tools called:")
                 for tc in self._current_tool_calls:
                     args_brief = json.dumps(tc.get("args", {}), ensure_ascii=False)[:120]
                     lines.append(f"  - {tc['tool']}({args_brief})")
-                if tool_errors:
-                    lines.append("\nErrors encountered:")
-                    for err in tool_errors[-3:]:
-                        lines.append(f"  >> {err}")
                 answer = "\n".join(lines)
-                answer += "\n\nPlease retry or refine your request. I'll continue from where I left off."
 
             if answer:
                 messages.append({"role": "assistant", "content": answer})
@@ -462,8 +404,7 @@ class BaseAgent:
     def run_interactive(self):
         messages = []
         print(self.format_banner())
-        print("Type 'quit' or 'exit' to end. Type 'clear' to reset conversation.")
-        print("Type '/search <query>' to search the web manually.\n")
+        print("Commands: 'quit'/'exit' to end, 'clear' to reset, '/image <path> <prompt>' to attach an image.\n")
 
         while True:
             try:
@@ -479,7 +420,21 @@ class BaseAgent:
                 break
             if user_input.lower() == "clear":
                 messages.clear()
+                self._pending_images = []
                 print("[Conversation cleared]\n")
                 continue
+            if user_input.startswith("/image "):
+                rest = user_input[len("/image "):].strip()
+                parts = rest.split(None, 1)
+                if not parts:
+                    print("Usage: /image <path> <prompt>")
+                    continue
+                path = os.path.expanduser(parts[0])
+                prompt_text = parts[1] if len(parts) > 1 else "Describe this image."
+                err = self.attach_image(path)
+                if err:
+                    print(err)
+                    continue
+                user_input = prompt_text
 
             self.process_prompt(user_input, messages)

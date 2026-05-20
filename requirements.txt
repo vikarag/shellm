@@ -1,8 +1,6 @@
 openai
-numpy
-mcp[cli]
 python-dotenv
-python-telegram-bot  # optional: for --telegram mode
-pdfplumber           # optional: PDF text extraction
-python-docx          # optional: DOCX text extraction
-camoufox             # optional: stealthy browser for fetch_page
+pyyaml
+ddgs              # DuckDuckGo search for the web_search tool
+beautifulsoup4    # HTML parsing for the fetch_page tool
+numpy             # used by rag_engine for embeddings math

@@ -1,38 +1,48 @@
-"""File tools for SheLLM — read, write, list, and search files within workspace/."""
+"""File tools for SheLLM — read, write, list, and search files within workspace/.
+
+All file operations are sandboxed to workspace/. Paths from the model are
+treated as relative to workspace/ regardless of whether they have a leading
+slash, so `/foo`, `foo`, and `./foo` all resolve to `workspace/foo`. Paths
+that try to escape via `..` get an error string back (not an exception) so
+the model can recover and retry.
+"""
 
 import os
 import re
 
 WORKSPACE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workspace")
-PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+_WORKSPACE_REAL = os.path.realpath(WORKSPACE)
 
 
 def _safe_path(relative_path):
-    """Resolve a relative path and ensure it stays within workspace/."""
-    if not relative_path:
-        return WORKSPACE
-    # Normalize and resolve
-    joined = os.path.join(WORKSPACE, relative_path)
-    real = os.path.realpath(joined)
-    if not real.startswith(os.path.realpath(WORKSPACE)):
-        raise ValueError(f"Path escapes workspace: {relative_path}")
-    return real
+    """Resolve a path inside workspace/.
 
-
-def _safe_read_path(relative_path):
-    """Resolve a relative path for reading — allows anywhere under the project directory."""
-    if not relative_path:
-        return PROJECT_DIR
-    joined = os.path.join(PROJECT_DIR, relative_path)
+    Returns (resolved_abs_path, error_str). On success error_str is None; on
+    failure resolved_abs_path is None and error_str describes the problem in
+    a way the model can act on (so it gets returned as a tool result rather
+    than raised as an exception).
+    """
+    # Treat empty / "." / "/" as the workspace root.
+    if not relative_path or relative_path in (".", "/"):
+        return _WORKSPACE_REAL, None
+    # Strip leading slashes so "/foo" and "foo" both anchor at workspace root.
+    cleaned = relative_path.lstrip("/").lstrip("\\")
+    joined = os.path.join(WORKSPACE, cleaned)
     real = os.path.realpath(joined)
-    if not real.startswith(os.path.realpath(PROJECT_DIR)):
-        raise ValueError(f"Path escapes project directory: {relative_path}")
-    return real
+    if real != _WORKSPACE_REAL and not real.startswith(_WORKSPACE_REAL + os.sep):
+        return None, (
+            f"Path '{relative_path}' is outside workspace/. "
+            "File operations are restricted to workspace/ — use '.' for its root, "
+            "or a path like 'notes.txt' or 'subdir/file.py'."
+        )
+    return real, None
 
 
 def read_file(path, offset=0, limit=200):
     """Read a file with line numbers. Returns up to `limit` lines starting from `offset`."""
-    real = _safe_read_path(path)
+    real, err = _safe_path(path)
+    if err:
+        return err
     if not os.path.isfile(real):
         return f"File not found: {path}"
     try:
@@ -56,7 +66,11 @@ def read_file(path, offset=0, limit=200):
 
 def write_file(path, content, mode="overwrite"):
     """Write or append to a file. Creates parent directories if needed."""
-    real = _safe_path(path)
+    real, err = _safe_path(path)
+    if err:
+        return err
+    if real == _WORKSPACE_REAL:
+        return "Refusing to write: target is the workspace root itself. Pass a filename."
     os.makedirs(os.path.dirname(real), exist_ok=True)
     write_mode = "a" if mode == "append" else "w"
     try:
@@ -71,7 +85,9 @@ def write_file(path, content, mode="overwrite"):
 
 def list_directory(path=".", recursive=False):
     """List files in a directory with sizes. Caps at 200 entries."""
-    real = _safe_path(path)
+    real, err = _safe_path(path)
+    if err:
+        return err
     if not os.path.isdir(real):
         return f"Directory not found: {path}"
 
@@ -116,7 +132,9 @@ def search_files(pattern, path=".", file_glob="*"):
     """Regex search across files in workspace. Returns up to 50 matches."""
     import fnmatch
 
-    real = _safe_path(path)
+    real, err = _safe_path(path)
+    if err:
+        return err
     if not os.path.isdir(real):
         return f"Directory not found: {path}"
 

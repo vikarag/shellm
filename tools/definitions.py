@@ -1,15 +1,16 @@
-"""Tool definitions for SheLLM agents."""
+"""Tool definitions for SheLLM."""
 
 TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "delegate_websearch",
-            "description": "Search the web for current information, facts, or real-time data. Delegates to a dedicated web search agent (GPT-5 Mini with live web search).",
+            "name": "web_search",
+            "description": "Search the web via DuckDuckGo. Returns a list of result snippets with title, URL, and a brief excerpt. Use this whenever you need current information or to discover URLs to read with fetch_page.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "The search query"},
+                    "max_results": {"type": "integer", "description": "Number of results to return (default 5, max 20)"},
                 },
                 "required": ["query"],
             },
@@ -19,12 +20,11 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "fetch_page",
-            "description": "Fetch and read the full content of a specific web page URL. Returns the visible text of the page. Use this when you have a specific URL to read (e.g. from search results, user-provided links). For discovering pages, use delegate_websearch instead.",
+            "description": "Fetch a specific URL and return its readable text content. Use after web_search when you have a specific URL to read, or when the user provides a link.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string", "description": "The URL to fetch and extract text from"},
-                    "wait_for": {"type": "string", "description": "Optional CSS selector to wait for before extracting (for JS-rendered content)"},
+                    "url": {"type": "string", "description": "The URL to fetch"},
                 },
                 "required": ["url"],
             },
@@ -33,55 +33,12 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "delegate_image",
-            "description": "Analyze an image using the vision agent. Send base64-encoded image data and a prompt.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "image_b64": {"type": "string", "description": "Base64-encoded image data"},
-                    "prompt": {"type": "string", "description": "What to analyze in the image"},
-                },
-                "required": ["image_b64", "prompt"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "delegate_research",
-            "description": "Conduct academic or in-depth research on a topic. Uses a research-specialized agent with web search and academic focus.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "The research topic or question"},
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "delegate_reason",
-            "description": "Delegate a complex reasoning task to the deep reasoning agent (DeepSeek Reasoner). Use for planning, analysis, math, logic, and multi-step problems that benefit from chain-of-thought reasoning.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "task": {"type": "string", "description": "The reasoning task or problem"},
-                },
-                "required": ["task"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "read_file",
-            "description": "Read a file from the project directory (~/shellm/) with line numbers. Can read source code, configs, etc. Use offset and limit for large files.",
+            "description": "Read a file from workspace/ with line numbers. All file operations are sandboxed to workspace/. Use offset and limit for large files.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative path within the project directory (e.g. 'base_chat.py', 'workspace/notes.txt')"},
+                    "path": {"type": "string", "description": "Path inside workspace/ — e.g. 'notes.txt' or 'subdir/file.py'. Use '.' for the workspace root. Never absolute paths."},
                     "offset": {"type": "integer", "description": "Start line (0-based, default 0)"},
                     "limit": {"type": "integer", "description": "Max lines to return (default 200)"},
                 },
@@ -139,7 +96,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "rag_index",
-            "description": "Index a document for semantic search. Chunks the text, generates embeddings, and stores for later retrieval. Use when the user wants to save a document for future Q&A.",
+            "description": "Index a document for semantic search. Chunks the text, generates embeddings, and stores it for later retrieval.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -155,12 +112,12 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "rag_search",
-            "description": "Search indexed documents by semantic similarity. Returns the most relevant chunks. Use when the user asks about previously indexed documents.",
+            "description": "Search indexed documents by semantic similarity. Returns the most relevant chunks.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "The search query"},
-                    "top_k": {"type": "integer", "description": "Number of results to return (default: 5)"},
+                    "top_k": {"type": "integer", "description": "Number of results to return (default 5)"},
                 },
                 "required": ["query"],
             },
@@ -204,7 +161,7 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "schedule": {"type": "string", "description": "Cron schedule expression, e.g. '0 9 * * *' for daily at 9am, '*/5 * * * *' for every 5 minutes"},
+                    "schedule": {"type": "string", "description": "Cron schedule expression, e.g. '0 9 * * *' for daily at 9am"},
                     "command": {"type": "string", "description": "Shell command to run"},
                 },
                 "required": ["schedule", "command"],
@@ -215,7 +172,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "cron_delete",
-            "description": "Delete a cron job by its index number (from cron_list). The user will be asked to confirm before deletion.",
+            "description": "Delete a cron job by its index number (from cron_list).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -229,7 +186,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "run_command",
-            "description": "Execute a shell command on the system. The user will be asked to confirm before execution. Dangerous commands (rm -rf, shutdown, etc.) are automatically blocked. Use for tasks like sending emails, scheduling with 'at', checking system info, file operations, etc.",
+            "description": "Execute a shell command. The user will be asked to confirm before execution. Dangerous commands are automatically blocked.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -257,7 +214,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "memory_write",
-            "description": "Save something to shared memory. Use this to remember user preferences, important facts, task results, or anything that should persist across sessions. All models share this memory.",
+            "description": "Save something to shared memory. Use this to remember user preferences, important facts, or anything that should persist across sessions.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -300,130 +257,14 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "chat_log_read",
-            "description": "Read past chat conversation logs. Returns recent chat history across all models and sessions. Use to recall what was discussed previously, find past answers, or check conversation context. Supports filtering by keyword and model name.",
+            "description": "Read past chat conversation logs. Supports filtering by keyword and model name.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "last_n": {"type": "integer", "description": "Number of recent entries to return (default 10, max 50)"},
-                    "keyword": {"type": "string", "description": "Optional keyword to filter logs (searches user input and assistant response)"},
-                    "model_filter": {"type": "string", "description": "Optional model name to filter by (e.g. 'gpt-5-mini', 'deepseek-chat')"},
+                    "keyword": {"type": "string", "description": "Optional keyword to filter logs"},
+                    "model_filter": {"type": "string", "description": "Optional model name to filter by"},
                 },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "send_file",
-            "description": "Send a file to the user via Telegram. Use this to deliver files you created "
-                           "(images, documents, scripts, etc.) directly in the chat. The file must exist "
-                           "in workspace/ or be an absolute path. For images (png/jpg/gif/webp), sends as "
-                           "a photo; otherwise sends as a document.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "File path — relative to workspace/ (e.g. 'st_kitts_flag.png') or absolute"},
-                    "caption": {"type": "string", "description": "Optional caption to send with the file"},
-                },
-                "required": ["path"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "mcp_list_servers",
-            "description": "List all configured MCP servers and their connection status.",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "mcp_list_tools",
-            "description": "List tools available from MCP servers.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "server": {"type": "string", "description": "Server name to filter (optional)"},
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "schedule_task",
-            "description": "Schedule a delayed task. Supports sending a Telegram message or running a shell command at a future time. Use delay_minutes for relative scheduling or scheduled_at for absolute time.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "task_type": {"type": "string", "enum": ["telegram_message", "shell_command"], "description": "Type of task to schedule"},
-                    "payload": {"type": "object", "description": "Task data. For telegram_message: {\"message\": \"...\"}. For shell_command: {\"command\": \"...\"}. chat_id is auto-injected for Telegram."},
-                    "delay_minutes": {"type": "number", "description": "Minutes from now to execute (e.g. 60 for 1 hour, 1800 for 30 hours)"},
-                    "scheduled_at": {"type": "string", "description": "Absolute time in 'YYYY-MM-DD HH:MM:SS' format (KST). Alternative to delay_minutes."},
-                },
-                "required": ["task_type", "payload"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_scheduled_tasks",
-            "description": "List scheduled tasks. Filter by status: pending, done, failed, cancelled.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "status": {"type": "string", "description": "Filter by status (default: pending)"},
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "cancel_scheduled_task",
-            "description": "Cancel a pending scheduled task by its ID.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "task_id": {"type": "integer", "description": "Task ID to cancel (from list_scheduled_tasks)"},
-                },
-                "required": ["task_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "report_progress",
-            "description": "Report completion of a major step during plan execution. Call this after finishing each numbered step. A background AI will summarize and notify the user.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "step_number": {"type": "integer", "description": "Step number completed (1-based)"},
-                    "total_steps": {"type": "integer", "description": "Total number of steps in the plan"},
-                    "step_title": {"type": "string", "description": "Brief title of the completed step"},
-                    "details": {"type": "string", "description": "What was accomplished, including key results"},
-                },
-                "required": ["step_number", "step_title", "details"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "delegate_claude",
-            "description": "Delegate a task to Claude Code (Anthropic's AI coding agent). Claude Code can explore codebases, read/edit files, run commands, and perform complex software engineering tasks. Use this when the user asks for code analysis, refactoring, debugging, or any task that benefits from Claude's coding capabilities. Specify a working directory to give Claude Code access to a specific project.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "prompt": {"type": "string", "description": "The task or question for Claude Code"},
-                    "directory": {"type": "string", "description": "Working directory for Claude Code (e.g. '~/nanoclaw'). Defaults to home directory."},
-                    "model": {"type": "string", "description": "Model to use: 'sonnet' (default, fast) or 'opus' (deep analysis)"},
-                },
-                "required": ["prompt"],
             },
         },
     },

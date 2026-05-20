@@ -2,15 +2,15 @@
 
 import os
 import yaml
-from dataclasses import dataclass, field
-from typing import Optional, List
+from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass
 class AgentConfig:
-    """Configuration for a single SheLLM agent."""
+    """Configuration for a single SheLLM agent profile."""
     name: str
-    provider: str                          # "deepseek" | "openai"
+    provider: str                          # label only; transport is OpenAI-compatible
     model: str
     api_key_env: str
     base_url: Optional[str] = None
@@ -18,17 +18,16 @@ class AgentConfig:
     temperature: Optional[float] = None
     supports_tools: bool = True
     has_reasoning: bool = False
-    tool_set: str = "full"                 # "full", "minimal", "mcp_only", "none"
-    mcp_servers: List[str] = field(default_factory=list)
-    delegations: List[str] = field(default_factory=list)
-    system_role: str = "primary"           # "primary", "updater", "mcp_worker", "reasoner", "vision", "websearch", "researcher"
+    vision: bool = False                   # set true when the model supports image inputs
 
 
-def load_agent_configs(config_path: Optional[str] = None) -> dict:
-    """Load agent configurations from YAML file.
+def load_agent_configs(config_path: Optional[str] = None) -> tuple[dict, Optional[str]]:
+    """Load agent configurations from YAML.
 
     Returns:
-        Dict mapping agent name -> AgentConfig
+        (configs, default_name) where configs maps agent name -> AgentConfig and
+        default_name is the profile to use when no --agent flag is passed
+        (taken from the top-level `default:` field, or the first agent if unset).
     """
     if config_path is None:
         config_path = os.path.join(
@@ -44,18 +43,24 @@ def load_agent_configs(config_path: Optional[str] = None) -> dict:
         name = agent_data["name"]
         configs[name] = AgentConfig(
             name=name,
-            provider=agent_data.get("provider", "deepseek"),
-            model=agent_data.get("model", "deepseek-chat"),
+            provider=agent_data.get("provider", ""),
+            model=agent_data.get("model", ""),
             api_key_env=agent_data.get("api_key_env", ""),
             base_url=agent_data.get("base_url"),
             stream=agent_data.get("stream", True),
             temperature=agent_data.get("temperature"),
             supports_tools=agent_data.get("supports_tools", True),
             has_reasoning=agent_data.get("has_reasoning", False),
-            tool_set=agent_data.get("tool_set", "full"),
-            mcp_servers=agent_data.get("mcp_servers", []),
-            delegations=agent_data.get("delegations", []),
-            system_role=agent_data.get("system_role", "primary"),
+            vision=agent_data.get("vision", False),
         )
 
-    return configs
+    default_name = raw.get("default")
+    if default_name and default_name not in configs:
+        raise ValueError(
+            f"agent_config.yaml: default '{default_name}' is not one of the configured agents: "
+            f"{list(configs)}"
+        )
+    if not default_name and configs:
+        default_name = next(iter(configs))
+
+    return configs, default_name
