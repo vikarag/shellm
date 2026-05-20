@@ -1,13 +1,16 @@
 """Tool execution dispatcher for SheLLM."""
 
+import base64
 import json
+import mimetypes
+import os
 import re
 import urllib.request
 
 from cron_manager import cron_list, cron_create, cron_delete
 from command_runner import run_command
 from memory_manager import memory_read, memory_write, memory_search, memory_delete
-from file_tools import read_file, write_file, list_directory, search_files
+from file_tools import read_file, write_file, list_directory, search_files, _safe_path
 from rag_engine import rag_index, rag_search, rag_list, rag_delete
 from agents.progress import progress_queue
 
@@ -15,9 +18,12 @@ from agents.progress import progress_queue
 class ToolContext:
     """Carries shared state needed by tool handlers."""
 
-    def __init__(self, model=None, print_fn=None):
+    def __init__(self, model=None, print_fn=None, queue_image=None):
         self.model = model
         self._print = print_fn or (lambda *a, **kw: None)
+        # Callback used by view_image to hand off image bytes to the agent
+        # so they get attached to the next model round-trip.
+        self.queue_image = queue_image or (lambda mime, b64: None)
 
 
 # ── Web ──────────────────────────────────────────────────────────────
@@ -92,6 +98,34 @@ def _exec_fetch_page(args, ctx):
 
     header = f"Title: {title}\nURL: {url}\n\n" if title else f"URL: {url}\n\n"
     return header + text
+
+
+# ── Vision ───────────────────────────────────────────────────────────
+
+def _exec_view_image(args, ctx):
+    """Load a workspace image and queue it for inline attachment on the next
+    model round-trip. The actual injection happens in BaseAgent.handle_tool_calls
+    once all tools in this round have finished."""
+    path = args.get("path", "")
+    real, err = _safe_path(path)
+    if err:
+        return err
+    if not os.path.isfile(real):
+        return f"Image not found: {path}"
+    mime, _ = mimetypes.guess_type(real)
+    if not mime or not mime.startswith("image/"):
+        return f"Not an image file: {path} (got mime: {mime or 'unknown'})"
+    try:
+        with open(real, "rb") as f:
+            raw = f.read()
+    except Exception as e:
+        return f"Error reading image: {e}"
+    b64 = base64.b64encode(raw).decode("ascii")
+    ctx.queue_image(mime, b64)
+    return (
+        f"Loaded '{path}' ({mime}, {len(raw)} bytes). "
+        "It is now attached to the conversation — describe it in your next response."
+    )
 
 
 # ── Files ────────────────────────────────────────────────────────────
@@ -202,6 +236,7 @@ def _exec_chat_log_read(args, ctx):
 TOOL_DISPATCH = {
     "web_search": _exec_web_search,
     "fetch_page": _exec_fetch_page,
+    "view_image": _exec_view_image,
     "read_file": _exec_read_file,
     "write_file": _exec_write_file,
     "list_directory": _exec_list_directory,

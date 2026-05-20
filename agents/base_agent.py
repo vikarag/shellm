@@ -133,7 +133,12 @@ class BaseAgent:
         if self.config.temperature is not None:
             params["temperature"] = self.config.temperature
         if self.config.supports_tools and TOOLS:
-            params["tools"] = TOOLS
+            # Vision-specific tools are hidden from non-vision profiles so the
+            # model isn't tempted to call something it can't actually consume.
+            tools = TOOLS
+            if not self.config.vision:
+                tools = [t for t in tools if t["function"]["name"] != "view_image"]
+            params["tools"] = tools
         return params
 
     def build_no_tool_params(self, messages):
@@ -145,7 +150,16 @@ class BaseAgent:
     # ── Tool execution ──────────────────────────────────────────────
 
     def _make_tool_context(self):
-        return ToolContext(model=self.config.model, print_fn=self._print)
+        return ToolContext(
+            model=self.config.model,
+            print_fn=self._print,
+            queue_image=self._queue_image,
+        )
+
+    def _queue_image(self, mime, b64):
+        """Callback invoked by view_image to attach an image to the next
+        model round-trip. Drained in handle_tool_calls."""
+        self._pending_images.append((mime, b64))
 
     def execute_tool(self, name, args):
         self._current_tool_calls.append({"tool": name, "args": args})
@@ -186,6 +200,20 @@ class BaseAgent:
                 "tool_call_id": tool_call.id,
                 "content": self._cap_tool_result(result_text),
             })
+        # If a tool queued image content (view_image), inject it as a user
+        # message before the next model round so the model can actually see
+        # it. Tool messages can't carry image content per the OpenAI schema,
+        # so a user-role injection is the standards-compliant way to surface
+        # mid-turn vision input.
+        if self._pending_images:
+            content = [{"type": "text", "text": "[Image(s) attached by view_image:]"}]
+            for mime, b64 in self._pending_images:
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime};base64,{b64}"},
+                })
+            self._pending_images = []
+            messages.append({"role": "user", "content": content})
         return self.client.chat.completions.create(**self.build_params(messages))
 
     # ── Stream / batch handlers ─────────────────────────────────────
@@ -301,8 +329,10 @@ class BaseAgent:
             )
         if self.config.vision:
             capability_lines.append(
-                "- You can read images attached to the user's turn — describe, transcribe, "
-                "or reason about their contents directly."
+                "- You can read images natively. Use view_image(path) to load any image "
+                "from workspace/ as visual input — DO NOT shell out to exiftool, "
+                "identify, or tesseract. The user can also attach images directly with "
+                "the /image command at the REPL."
             )
         capability_block = ("\n".join(capability_lines) + "\n\n") if capability_lines else ""
 
@@ -328,7 +358,11 @@ class BaseAgent:
             "Your first move for anything time-sensitive or outside training cutoff.\n"
             "- fetch_page(url): the readable text of a specific URL. Use after web_search for depth, "
             "or when the user provides a link.\n"
-            "- read_file / write_file / list_directory / search_files: workspace file ops.\n"
+            + ("- view_image(path): load an image from workspace/ as visual input. "
+               "Always use this for image questions instead of running exiftool/identify/tesseract.\n"
+               if self.config.vision else "")
+            + "- read_file / write_file / list_directory / search_files: workspace file ops "
+              "(read_file is text-only; for images use view_image).\n"
             "- run_command(command, timeout=60): shell execution in workspace/. Pass timeout=300 for "
             "installs (apt/pip/npm) or long-running tasks.\n"
             "- memory_read / memory_write / memory_search / memory_delete: persistent memory that "

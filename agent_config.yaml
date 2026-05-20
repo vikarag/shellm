@@ -48,4 +48,4 @@ agents:
     temperature: 0.1
     supports_tools: true
     has_reasoning: true
-    vision: false
+    vision: true

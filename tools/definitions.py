@@ -33,8 +33,22 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "view_image",
+            "description": "Load an image file from workspace/ as visual input. The image is attached inline before your next response, so you can describe, transcribe, or reason about it directly. Prefer this over shelling out to exiftool/tesseract/identify — you have native vision.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Image path inside workspace/ (e.g. 'photo.jpg', 'subdir/diagram.png'). Supported types: jpg/png/gif/webp."},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "read_file",
-            "description": "Read a file from workspace/ with line numbers. All file operations are sandboxed to workspace/. Use offset and limit for large files.",
+            "description": "Read a TEXT file from workspace/ with line numbers. For images, use view_image instead. All file operations are sandboxed to workspace/. Use offset and limit for large files.",
             "parameters": {
                 "type": "object",
                 "properties": {
